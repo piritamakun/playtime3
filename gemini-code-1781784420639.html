@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P 2D Shooter</title>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <style>
+        /* ================= UI & Animations ================= */
+        :root {
+            --primary: #0ff;
+            --danger: #f05;
+            --bg: #0b0c10;
+            --panel: rgba(31, 40, 51, 0.85);
+        }
+        body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; user-select: none; width: 100vw; height: 100vh; touch-action: none; }
+        
+        /* Lobby & Waiting Room */
+        #lobby, #waiting-room {
+            position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: radial-gradient(circle at center, #1f2833 0%, var(--bg) 100%);
+            z-index: 100; transition: opacity 0.5s ease;
+        }
+        #waiting-room { z-index: 150; display: none; }
+
+        .lobby-panel {
+            background: var(--panel); padding: 40px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,255,255,0.2);
+            backdrop-filter: blur(10px); border: 1px solid rgba(0, 255, 255, 0.1); text-align: center;
+        }
+        h1 { margin-top: 0; color: var(--primary); text-shadow: 0 0 10px var(--primary); }
+        input[type="text"], input[type="number"] {
+            width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 8px; background: rgba(0,0,0,0.5);
+            color: white; font-size: 16px; outline: none; border: 1px solid transparent; transition: 0.3s; box-sizing: border-box;
+        }
+        input:focus { border-color: var(--primary); box-shadow: 0 0 10px rgba(0,255,255,0.5); }
+        button {
+            width: 100%; padding: 14px; margin: 10px 0; border: none; border-radius: 8px; background: var(--primary);
+            color: #000; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; box-sizing: border-box;
+        }
+        button:hover:not(:disabled) { background: white; box-shadow: 0 0 15px var(--primary); transform: translateY(-2px); }
+        .divider { margin: 20px 0; font-size: 14px; color: #aaa; position: relative; }
+        
+        /* Game UI */
+        #game-ui { display: none; position: absolute; inset: 0; pointer-events: none; z-index: 50; }
+        
+        /* Global Announcement */
+        #global-announcement {
+            position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+            font-size: 26px; font-weight: bold; color: #ffd700; text-shadow: 0 0 15px #f00, 0 0 30px #f00;
+            z-index: 300; text-align: center; pointer-events: none; display: none; background: rgba(0,0,0,0.75); padding: 12px 24px; border-radius: 8px; border: 1px solid var(--danger);
+        }
+
+        /* Timer */
+        #timer-display {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: var(--panel); padding: 10px 25px; border-radius: 8px; border-bottom: 3px solid var(--primary);
+            font-size: 22px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5); z-index: 150; display: none;
+        }
+
+        /* Host Choice Panel (After Time Up) */
+        #host-choice-panel {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: var(--panel); padding: 25px; border-radius: 16px; border: 2px solid var(--primary);
+            box-shadow: 0 0 30px rgba(0,255,255,0.3); z-index: 250; text-align: center; display: none; width: 320px; pointer-events: auto;
+        }
+        #host-choice-panel button { margin: 5px 0; }
+
+        /* Top Left: Points */
+        #top-left-ui { position: absolute; top: 20px; left: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .hud-box {
+            background: var(--panel); padding: 15px 25px; border-radius: 8px; border-left: 4px solid var(--primary);
+            backdrop-filter: blur(5px); font-size: 24px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        /* Top Right Display & Leave Button */
+        #room-display { position: absolute; top: 20px; right: 20px; font-size: 18px; color: #aaa; display: flex; align-items: center; gap: 15px; }
+        .leave-btn {
+            pointer-events: auto; background: var(--danger); color: white; border: none; padding: 8px 16px;
+            font-size: 14px; font-weight: bold; cursor: pointer; border-radius: 6px; box-shadow: 0 4px 10px rgba(255,0,85,0.3); transition: 0.2s;
+        }
+        .leave-btn:hover { background: white; color: black; box-shadow: 0 0 15px white; transform: translateY(-1px); }
+
+        /* Bottom Left Area (Weapon & HP) */
+        #bottom-left-ui { position: absolute; bottom: 30px; left: 20px; display: flex; flex-direction: column; gap: 15px; }
+        #weapon-row { display: flex; align-items: center; gap: 15px; }
+        #ammo-display { border-left-color: #ffd700; font-size: 18px; }
+
+        /* Reloading Text */
+        #center-msg {
+            font-size: 24px; font-weight: bold; color: #ffd700; text-shadow: 0 0 10px #ffd700;
+            opacity: 0; transition: opacity 0.2s; white-space: nowrap;
+        }
+
+        #hp-container {
+            width: 300px; background: rgba(0,0,0,0.6);
+            border-radius: 15px; padding: 10px; border: 1px solid rgba(255,255,255,0.1);
+        }
+        #hp-bar-bg { width: 100%; height: 20px; background: #333; border-radius: 10px; overflow: hidden; }
+        #hp-bar { width: 100%; height: 100%; background: linear-gradient(90deg, #f05, #ff007f); transition: width 0.2s ease-out; }
+        #hp-text { margin-top: 5px; font-size: 20px; font-weight: bold; display: block; }
+
+        /* Leaderboard */
+        #leaderboard {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9);
+            background: var(--panel); padding: 30px; border-radius: 16px; border: 1px solid var(--primary);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8); backdrop-filter: blur(10px); width: 400px;
+            opacity: 0; pointer-events: none; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #leaderboard.show { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: auto; }
+        #leaderboard h2 { margin-top: 0; text-align: center; border-bottom: 2px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
+        .rank-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 18px; align-items: center; }
+        .rank-row.me { color: var(--primary); font-weight: bold; }
+        #client-wait-msg { font-size: 18px; color: #ffd700; margin-top: 10px; text-align: center; font-weight: bold; display: none; text-shadow: 0 0 5px black; }
+
+        /* Admin Panel */
+        #admin-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: var(--panel); padding: 20px; border-radius: 16px; border: 2px solid var(--danger);
+            display: none; z-index: 200; pointer-events: auto; width: 340px; text-align: center;
+        }
+        #admin-panel.permanent {
+            position: absolute; top: 75px; right: 20px; left: auto; transform: none;
+            box-shadow: 0 0 20px rgba(255, 0, 85, 0.4); border-color: var(--danger);
+        }
+        .radio-group { text-align: left; margin: 10px 0; font-size: 14px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; }
+        .radio-group label { display: block; margin-bottom: 5px; cursor: pointer; color: #fff; }
+        .admin-input-box { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; background: rgba(0,0,0,0.4); color: white; border: 1px solid #555; box-sizing: border-box; font-size: 14px; }
+
+        /* Admin Player List Panel */
+        #admin-player-list-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: var(--panel); padding: 20px; border-radius: 16px; border: 2px solid #80f;
+            display: none; z-index: 250; pointer-events: auto; width: 340px; text-align: center;
+            box-shadow: 0 0 30px rgba(128, 0, 255, 0.4);
+        }
+        .admin-player-item {
+            display: flex; justify-content: space-between; align-items: center;
+            background: rgba(0,0,0,0.4); padding: 8px 12px; margin-bottom: 5px; border-radius: 6px;
+        }
+        .admin-player-item button { margin: 0; width: auto; padding: 6px 12px; background: var(--danger); font-size: 12px; }
+
+        canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+    </style>
+</head>
+<body>
+
+    <div id="global-announcement"></div>
+    <div id="timer-display">残り時間: --</div>
+
+    <div id="host-choice-panel">
+        <h3 style="margin-top:0; color:var(--primary);">⏳ 制限時間終了</h3>
+        <p style="font-size:14px; color:#ccc; margin-bottom:15px;">次のゲームアクションを選択してください</p>
+        <button onclick="hostChooseContinue()" style="background:#0f5; color:black;">ゲームを続ける (リセット)</button>
+        <button onclick="hostChooseEnd()" style="background:var(--danger); color:white;">ゲームを終了する (解散)</button>
+    </div>
+
+    <div id="lobby">
+        <div class="lobby-panel">
+            <h1>NEON ARENA</h1>
+            <input type="text" id="player-name" placeholder="プレイヤー名 (ID) を入力" maxlength="10">
+            <input type="number" id="game-duration-input" placeholder="制限時間 (秒) ※空欄で無限" min="5">
+            <button id="btn-host">部屋を作成する</button>
+            <div class="divider">または</div>
+            <input type="number" id="room-id-input" placeholder="部屋番号 (数字) を入力">
+            <button id="btn-join">部屋に参加する</button>
+            <p id="lobby-status" style="color: var(--danger); font-size: 14px; font-weight: bold; margin-top: 15px;"></p>
+        </div>
+    </div>
+
+    <div id="waiting-room">
+        <div class="lobby-panel" style="width: 400px;">
+            <h1>WAITING ROOM</h1>
+            <h2 style="margin: 10px 0;">Room: <span id="wait-room-id"></span></h2>
+            <div style="background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; text-align: left; max-height: 200px; overflow-y: auto;">
+                <h3 style="margin-top: 0; border-bottom: 1px solid var(--primary); padding-bottom: 5px; color:white;">参加中のプレイヤー</h3>
+                <ul id="wait-player-list" style="list-style: none; padding: 0; margin: 0; font-size: 18px; line-height: 1.8; color: var(--primary); font-weight: bold;"></ul>
+            </div>
+            <button id="btn-start-game" onclick="startActualGame()" style="display:none; width: 100%; margin-top: 20px; background:#555; cursor:not-allowed;" disabled>2人以上で開始可能</button>
+            <p id="wait-status-msg" style="color: #aaa; margin-top: 15px;">ホストの開始を待っています...</p>
+        </div>
+    </div>
+
+    <div id="admin-panel">
+        <h2 style="color:var(--primary); margin-bottom:10px; font-size:20px;">ADMIN PANEL</h2>
+        
+        <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+            <input type="number" id="admin-hp-input" class="admin-input-box" placeholder="自分のHPを指定 (例: 9999)" style="margin:0; flex: 1;">
+            <button onclick="adminSetHP()" style="background:#0f5; color:black; margin:0; padding: 10px; width: 70px;">変更</button>
+        </div>
+        
+        <input type="text" id="admin-msg-input" class="admin-input-box" placeholder="画面に表示するメッセージ">
+        <div class="radio-group">
+            <label><input type="radio" name="msg-scope" value="room" checked> この部屋のみ (This Room)</label>
+            <label><input type="radio" name="msg-scope" value="global"> 全員 (全サーバー共通)</label>
+        </div>
+        <button onclick="sendAdminMessage()" style="background:#ffd700; color:black; margin:5px 0;">メッセージを送信</button>
+        <hr style="border-color: rgba(255,255,255,0.1); margin: 15px 0;">
+        
+        <button onclick="toggleAdminPlayerList()" style="background:#80f; margin:5px 0; color:white;">プレイヤー一覧 (キル)</button>
+        
+        <button id="btn-freeze" onclick="toggleFreeze()" style="background:var(--danger); margin:5px 0;">停止機能: OFF</button>
+        <button id="btn-no-reload" onclick="toggleNoReload()" style="background:#555; margin:5px 0; color:white;">No Reload: OFF</button>
+        <button id="btn-admin-close" onclick="toggleAdminPanel()" style="background:#aaa; margin-top:10px;">閉じる</button>
+    </div>
+
+    <div id="admin-player-list-panel">
+        <h3 style="margin-top:0; color:var(--primary);">プレイヤー一覧</h3>
+        <ul id="admin-player-list" style="list-style:none; padding:0; margin:0; max-height:250px; overflow-y:auto;"></ul>
+        <button onclick="toggleAdminPlayerList()" style="background:#555; color:white; margin-top:15px;">閉じる</button>
+    </div>
+
+    <div id="game-ui">
+        <div id="top-left-ui">
+            <div class="hud-box">Points: <span id="points-display">0</span></div>
+            <div style="color:#aaa; font-size:14px; font-weight:bold; margin-top:5px; text-shadow: 0 1px 2px black;">[M] キーで全体マップ</div>
+        </div>
+        <div id="room-display">
+            Room: <span id="room-number"></span>
+            <button class="leave-btn" id="btn-leave-normal" onclick="location.reload()">部屋を退出</button>
+            <button class="leave-btn" id="btn-leave-host" onclick="hostDisbandRoom()" style="display:none; background:#333;">部屋を解散</button>
+        </div>
+        
+        <div id="bottom-left-ui">
+            <div id="weapon-row">
+                <div class="hud-box" id="ammo-display">Ammo: <span id="ammo-count">30</span>/∞ <span style="font-size:12px">[R] Reload</span></div>
+                <div id="center-msg">RELOADING...</div>
+            </div>
+            <div id="hp-container">
+                <div id="hp-bar-bg"><div id="hp-bar"></div></div>
+                <span id="hp-text">100 / 100</span>
+            </div>
+        </div>
+        
+        <div id="leaderboard">
+            <h2>ランキング</h2>
+            <div id="rank-list"></div>
+            <div id="client-wait-msg">ホストの選択を待っています...</div>
+            <p style="text-align:center; font-size:12px; color:#aaa; margin-bottom:0; margin-top: 15px;">[B] を押して閉じる</p>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+/**
+ * P2P & Game Logic 
+ */
+const PREFIX = 'neon_arena_room_'; 
+let peer = null;
+let connections = {}; 
+let connection = null; 
+
+// クロスプレイ完全対応
+const globalPeerConfig = {
+    'iceServers': [
+        { url: 'stun:stun.l.google.com:19302' }, 
+        { url: 'stun:stun1.l.google.com:19302' },
+        { url: 'stun:stun2.l.google.com:19302' },
+        { url: 'stun:stun3.l.google.com:19302' },
+        { url: 'stun:stun4.l.google.com:19302' }
+    ]
+};
+
+const MAP_WIDTH = 2500;
+const MAP_HEIGHT = 2500;
+
+let myId = null;
+let myName = "";
+let isHost = false;
+let roomNumber = "";
+let frameCount = 0; 
+
+let camera = { x: 0, y: 0 };
+const keys = { w:false, a:false, s:false, d:false };
+let screenMouse = { x: 0, y: 0 }; 
+const mouse = { x: 0, y: 0, down: false }; 
+let showLeaderboard = false;
+let showFullMap = false; 
+
+const MAX_AMMO = 30;
+let ammo = MAX_AMMO;
+let isReloading = false;
+let lastShootTime = 0;
+let adminNoReload = false; 
+
+let inputBuffer = "";
+let isAdminUnlocked = false;
+let globalMasterPeer = null; 
+let globalMasterConnections = []; 
+
+let gameState = {
+    status: 'waiting', 
+    players: {},
+    bullets: [],
+    particles: [],
+    isFrozen: false,
+    adminMsg: "",
+    maxTime: 0,
+    timeLeft: 0,
+    isTimeUp: false,
+    isDisbanded: false
+};
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas(); 
+
+const lobby = document.getElementById('lobby');
+const gameUi = document.getElementById('game-ui');
+const statusText = document.getElementById('lobby-status');
+
+// ================= 管理者メッセージ＆時間UI等の常時監視 =================
+let globalAdminMsg = "";
+let globalAdminMsgTimer = 0;
+let lastPlayerListHTML = "";
+
+setInterval(() => {
+    const globalAnn = document.getElementById('global-announcement');
+    if (globalAdminMsg) {
+        globalAnn.innerText = `📢 ADMIN: ${globalAdminMsg}`;
+        globalAnn.style.display = 'block';
+    } else if (gameState && gameState.adminMsg) {
+        globalAnn.innerText = `📢 ADMIN: ${gameState.adminMsg}`;
+        globalAnn.style.display = 'block';
+    } else {
+        globalAnn.style.display = 'none';
+    }
+    
+    if (globalAdminMsgTimer > 0) {
+        globalAdminMsgTimer--;
+        if (globalAdminMsgTimer <= 0) globalAdminMsg = "";
+    }
+
+    if (gameState && gameState.maxTime > 0) {
+        const timerDisp = document.getElementById('timer-display');
+        timerDisp.style.display = 'block';
+        if (gameState.isTimeUp) {
+            timerDisp.innerText = "タイムアップ！";
+            timerDisp.style.color = "var(--danger)";
+        } else {
+            timerDisp.innerText = `残り時間: ${gameState.timeLeft}秒`;
+            timerDisp.style.color = "white";
+        }
+    } else {
+        document.getElementById('timer-display').style.display = 'none';
+    }
+
+    if (gameState && gameState.isTimeUp) {
+        const lb = document.getElementById('leaderboard');
+        if (lb) lb.classList.add('show');
+        
+        if (isHost) {
+            document.getElementById('host-choice-panel').style.display = 'block';
+            document.getElementById('client-wait-msg').style.display = 'none';
+        } else {
+            document.getElementById('host-choice-panel').style.display = 'none';
+            document.getElementById('client-wait-msg').style.display = 'none'; 
+        }
+    } else {
+        document.getElementById('host-choice-panel').style.display = 'none';
+        document.getElementById('client-wait-msg').style.display = 'none';
+    }
+
+    const plPanel = document.getElementById('admin-player-list-panel');
+    if (plPanel && plPanel.style.display === 'block') {
+        updateAdminPlayerListUI();
+    }
+}, 100);
+
+// ================= Global Receiver =================
+let globalReceiverPeer = null;
+let globalReceiverConn = null;
+
+function initGlobalReceiver() {
+    globalReceiverPeer = new Peer({ config: globalPeerConfig });
+    globalReceiverPeer.on('open', () => { tryConnectGlobalMaster(); });
+    globalReceiverPeer.on('error', () => { setTimeout(initGlobalReceiver, 5000); });
+}
+
+function tryConnectGlobalMaster() {
+    if (isAdminUnlocked || isHost) return; 
+    if (!globalReceiverPeer || globalReceiverPeer.destroyed) return;
+    if (!globalReceiverConn || !globalReceiverConn.open) {
+        globalReceiverConn = globalReceiverPeer.connect('neon_arena_global_super_admin_master', { reliable: true });
+        globalReceiverConn.on('data', (data) => {
+            if (data.type === 'global_msg') {
+                globalAdminMsg = data.text;
+                globalAdminMsgTimer = 50; 
+            }
+        });
+    }
+}
+setInterval(tryConnectGlobalMaster, 5000);
+window.addEventListener('load', initGlobalReceiver);
+
+// ================= 隠しコマンド検知 =================
+window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (/[0-9]/.test(e.key)) {
+        inputBuffer += e.key;
+        if (inputBuffer.length > 6) inputBuffer = inputBuffer.substring(inputBuffer.length - 6);
+        if (inputBuffer === "140923") {
+            isAdminUnlocked = true;
+            document.getElementById('admin-panel').classList.add('permanent'); 
+            document.getElementById('admin-panel').style.display = 'block'; 
+            document.getElementById('btn-admin-close').style.display = 'none'; 
+            
+            if (!globalMasterPeer) {
+                globalMasterPeer = new Peer('neon_arena_global_super_admin_master', { config: globalPeerConfig });
+                globalMasterPeer.on('connection', (conn) => { globalMasterConnections.push(conn); });
+            }
+            alert("管理者パネルが解放されました！[X]キーで開閉、全サーバー送信が可能です。\n※管理者特権(無限弾/フリーズ無効)が適用されます。");
+            updateHUD();
+        }
+    }
+});
+
+// ================= Admin Logic =================
+function toggleAdminPanel() {
+    if (!isAdminUnlocked) return; 
+    const panel = document.getElementById('admin-panel');
+    panel.style.display = (panel.style.display === 'block' || window.getComputedStyle(panel).display === 'block') ? 'none' : 'block';
+}
+
+function toggleFreeze() {
+    if(!isAdminUnlocked) return;
+    if(isHost) {
+        gameState.isFrozen = !gameState.isFrozen;
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'toggleFreeze' });
+    }
+}
+
+function toggleNoReload() {
+    if(!isAdminUnlocked) return;
+    adminNoReload = !adminNoReload; 
+    updateHUD();
+}
+
+function sendAdminMessage() {
+    if(!isAdminUnlocked) return;
+    const msg = document.getElementById('admin-msg-input').value.trim();
+    if (!msg) return;
+    
+    const scope = document.querySelector('input[name="msg-scope"]:checked').value;
+
+    if (scope === 'global' && globalMasterPeer) {
+        globalMasterConnections.forEach(c => {
+            if (c.open) c.send({ type: 'global_msg', text: msg });
+        });
+        globalAdminMsg = "[GLOBAL] " + msg;
+        globalAdminMsgTimer = 50;
+    } else {
+        if(isHost) {
+            gameState.adminMsg = msg;
+            gameState.adminMsgTimer = 300; 
+        } else if(connection && connection.open) {
+            connection.send({ type: 'admin_command', command: 'roomMsg', text: msg });
+        }
+    }
+    document.getElementById('admin-msg-input').value = '';
+}
+
+function adminSetHP() {
+    if(!isAdminUnlocked && !isHost) return;
+    const val = parseInt(document.getElementById('admin-hp-input').value);
+    if(isNaN(val)) return;
+    
+    if(isHost) {
+        if(gameState.players[myId]) gameState.players[myId].hp = val;
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'setHP', targetId: myId, hp: val });
+    }
+    document.getElementById('admin-hp-input').value = '';
+}
+
+function toggleAdminPlayerList() {
+    if(!isAdminUnlocked && !isHost) return;
+    const pnl = document.getElementById('admin-player-list-panel');
+    if(pnl.style.display === 'block' || window.getComputedStyle(pnl).display === 'block') {
+        pnl.style.display = 'none';
+    } else {
+        pnl.style.display = 'block';
+        updateAdminPlayerListUI();
+    }
+}
+
+function updateAdminPlayerListUI() {
+    const list = document.getElementById('admin-player-list');
+    if(!list || !gameState.players) return;
+    let html = '';
+    for(let id in gameState.players) {
+        let p = gameState.players[id];
+        html += `<li class="admin-player-item">
+            <span style="color:${p.color}; font-weight:bold; font-size:16px;">${p.name} (HP: ${Math.max(0, p.hp)})</span>
+            <button onclick="adminKillPlayer('${id}')">KILL</button>
+        </li>`;
+    }
+    if (lastPlayerListHTML !== html) {
+        list.innerHTML = html;
+        lastPlayerListHTML = html;
+    }
+}
+
+function adminKillPlayer(targetId) {
+    if(!isAdminUnlocked && !isHost) return;
+    if(isHost) {
+        let p = gameState.players[targetId];
+        if(p && p.hp > 0) {
+            p.hp = 0;
+            spawnParticles(p.x, p.y, p.color, 30);
+            setTimeout(() => {
+                if(gameState.players[targetId]) {
+                    gameState.players[targetId].hp = 100;
+                    gameState.players[targetId].x = Math.random() * MAP_WIDTH;
+                    gameState.players[targetId].y = Math.random() * MAP_HEIGHT;
+                }
+            }, 2000);
+        }
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'killPlayer', targetId: targetId });
+    }
+}
+
+function hostDisbandRoom() {
+    if (!isHost) return;
+    if (confirm("本当に部屋を解散しますか？全プレイヤーも自動的に退出されます。")) {
+        gameState.isDisbanded = true;
+        setTimeout(() => { location.reload(); }, 150);
+    }
+}
+
+function hostChooseContinue() {
+    if (!isHost) return;
+    const durationInput = document.getElementById('game-duration-input').value;
+    gameState.maxTime = durationInput ? parseInt(durationInput) : 0;
+    gameState.timeLeft = gameState.maxTime;
+    gameState.isTimeUp = false;
+    gameState.status = 'playing';
+    
+    for(let id in gameState.players) {
+        gameState.players[id].hp = 100;
+        gameState.players[id].x = Math.random() * MAP_WIDTH;
+        gameState.players[id].y = Math.random() * MAP_HEIGHT;
+    }
+    document.getElementById('host-choice-panel').style.display = 'none';
+}
+
+function hostChooseEnd() {
+    if (!isHost) return;
+    hostDisbandRoom();
+}
+
+function startActualGame() {
+    if(!isHost) return;
+    if(Object.keys(gameState.players).length >= 2) {
+        gameState.status = 'playing'; 
+    }
+}
+
+// ================= Networking (PeerJS) =================
+
+document.getElementById('btn-host').addEventListener('click', () => {
+    myName = document.getElementById('player-name').value.trim() || "Player";
+    roomNumber = Math.floor(1000 + Math.random() * 9000).toString(); 
+    
+    statusText.innerText = "部屋を作成中...";
+    if (peer) peer.destroy();
+    
+    peer = new Peer(PREFIX + roomNumber, { config: globalPeerConfig });
+    
+    peer.on('open', (id) => {
+        isHost = true;
+        myId = "host";
+        startGame();
+        
+        const durationInput = document.getElementById('game-duration-input').value;
+        gameState.maxTime = durationInput ? parseInt(durationInput) : 0;
+        gameState.timeLeft = gameState.maxTime;
+        gameState.adminMsgTimer = 0;
+        
+        addPlayerToState(myId, myName);
+        
+        peer.on('connection', (conn) => {
+            connections[conn.peer] = conn;
+            conn.on('data', (data) => {
+                if(data.type === 'init') {
+                    addPlayerToState(conn.peer, data.name);
+                } 
+                else if(data.t === 'in') {
+                    if(gameState.players[conn.peer]) {
+                        gameState.players[conn.peer].input = data.k;
+                        gameState.players[conn.peer].mouse = data.m;
+                        gameState.players[conn.peer].isAdmin = data.ad;
+                    }
+                } else if(data.t === 'sh') {
+                    handleShoot(conn.peer, data.m, data.cp);
+                } else if(data.type === 'admin_command') {
+                    if(data.command === 'toggleFreeze') gameState.isFrozen = !gameState.isFrozen;
+                    if(data.command === 'roomMsg') {
+                        gameState.adminMsg = data.text;
+                        gameState.adminMsgTimer = 300;
+                    }
+                    if(data.command === 'setHP' && gameState.players[data.targetId]) {
+                        gameState.players[data.targetId].hp = data.hp;
+                    }
+                    if(data.command === 'killPlayer' && gameState.players[data.targetId]) {
+                        let p = gameState.players[data.targetId];
+                        if(p.hp > 0) {
+                            p.hp = 0;
+                            spawnParticles(p.x, p.y, p.color, 30);
+                            setTimeout(() => {
+                                if(gameState.players[data.targetId]) {
+                                    gameState.players[data.targetId].hp = 100;
+                                    gameState.players[data.targetId].x = Math.random() * MAP_WIDTH;
+                                    gameState.players[data.targetId].y = Math.random() * MAP_HEIGHT;
+                                }
+                            }, 2000);
+                        }
+                    }
+                }
+            });
+            conn.on('close', () => { 
+                delete gameState.players[conn.peer]; 
+                delete connections[conn.peer]; 
+            });
+        });
+    });
+    peer.on('error', (err) => { statusText.innerText = "エラー: " + err.type; });
+});
+
+document.getElementById('btn-join').addEventListener('click', () => {
+    myName = document.getElementById('player-name').value.trim() || "Player";
+    roomNumber = document.getElementById('room-id-input').value.trim();
+    if(!roomNumber) return; 
+
+    statusText.innerText = "サーバーに接続中...";
+    if (peer) { peer.destroy(); }
+    
+    peer = new Peer({ config: globalPeerConfig });
+
+    peer.on('open', (id) => {
+        myId = id;
+        isHost = false;
+        statusText.innerText = `部屋(${roomNumber})を検索中...`;
+        
+        setTimeout(() => {
+            connection = peer.connect(PREFIX + roomNumber, { reliable: true });
+            const timeoutId = setTimeout(() => {
+                if (!connection || !connection.open) statusText.innerText = "エラー: ホストが見つかりません。";
+            }, 5000);
+
+            connection.on('open', () => {
+                clearTimeout(timeoutId);
+                connection.send({ type: 'init', name: myName });
+                startGame();
+            });
+            
+            // 【完全修正】受信時の不要な上書きを防ぎ、全ての操作変数と補間（Lerp）を保持する
+            connection.on('data', (data) => {
+                if(data.t === 's') {
+                    let reconstructed = {
+                        status: data.s.st, isFrozen: data.s.f, adminMsg: data.s.a,
+                        timeLeft: data.s.tm, maxTime: data.s.mt, isTimeUp: data.s.up, isDisbanded: data.s.db,
+                        players: {},
+                        // 弾やパーティクルは受信時にラグの分だけ（2フレーム分）前進させることでチラつきを根絶
+                        bullets: data.s.b.map(b => ({x: b[0] + b[2]*2, y: b[1] + b[3]*2, vx: b[2], vy: b[3]})),
+                        particles: data.s.pt.map(p => ({x: p[0] + p[4]*2, y: p[1] + p[5]*2, life: p[2]/100, color: p[3], vx: p[4], vy: p[5]}))
+                    };
+                    
+                    for(let id in data.s.p) {
+                        let cp = data.s.p[id];
+                        let oldP = gameState.players && gameState.players[id];
+                        
+                        reconstructed.players[id] = {
+                            id: id, name: cp.n,
+                            targetX: cp.x, targetY: cp.y,
+                            x: oldP ? oldP.x : cp.x,
+                            y: oldP ? oldP.y : cp.y,
+                            hp: cp.h, points: cp.pt, color: cp.c, mouse: {x: cp.mx, y: cp.my},
+                            isAdmin: oldP ? oldP.isAdmin : false,
+                            input: oldP ? oldP.input : {w:false,a:false,s:false,d:false}
+                        };
+                    }
+                    gameState = reconstructed;
+                }
+            });
+            
+            connection.on('close', () => { location.reload(); });
+        }, 500); 
+    });
+});
+
+// ================= Game Logic =================
+
+function startGame() {
+    lobby.style.opacity = '0';
+    setTimeout(() => lobby.style.display = 'none', 500);
+    document.getElementById('waiting-room').style.display = 'flex';
+    document.getElementById('wait-room-id').innerText = roomNumber;
+    document.getElementById('room-number').innerText = roomNumber;
+    
+    if (isHost) {
+        document.getElementById('btn-leave-normal').style.display = 'none';
+        document.getElementById('btn-leave-host').style.display = 'block';
+    } else {
+        document.getElementById('btn-leave-normal').style.display = 'block';
+        document.getElementById('btn-leave-host').style.display = 'none';
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const k = e.key.toLowerCase();
+        if(['w','a','s','d'].includes(k)) keys[k] = true;
+        if(k === 'b') toggleLeaderboard();
+        if(k === 'r') reloadWeapon();
+        if(k === 'x') toggleAdminPanel(); 
+        if(k === 'm') showFullMap = !showFullMap; 
+    });
+    
+    window.addEventListener('keyup', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const k = e.key.toLowerCase();
+        if(['w','a','s','d'].includes(k)) keys[k] = false;
+    });
+
+    window.addEventListener('blur', () => {
+        for(let k in keys) keys[k] = false;
+        mouse.down = false;
+    });
+    
+    window.addEventListener('mousemove', (e) => { screenMouse.x = e.clientX; screenMouse.y = e.clientY; });
+
+    window.addEventListener('mousedown', (e) => { 
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL') {
+            for(let k in keys) keys[k] = false;
+            return; 
+        }
+        if(e.button === 0) mouse.down = true; 
+    });
+    window.addEventListener('mouseup', (e) => { if(e.button === 0) mouse.down = false; });
+
+    const preventScroll = (e) => {
+        if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') {
+            e.preventDefault(); 
+            if(e.touches.length > 0) {
+                screenMouse.x = e.touches[0].clientX;
+                screenMouse.y = e.touches[0].clientY;
+            }
+        }
+    };
+    
+    window.addEventListener('touchstart', (e) => { 
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL') {
+            for(let k in keys) keys[k] = false;
+            return;
+        }
+        preventScroll(e); 
+        mouse.down = true; 
+    }, { passive: false });
+    
+    window.addEventListener('touchmove', preventScroll, { passive: false });
+    window.addEventListener('touchend', (e) => {
+        if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') mouse.down = false;
+    });
+
+    requestAnimationFrame(gameLoop);
+    if(isHost) setInterval(hostUpdate, 1000 / 60);
+}
+
+function addPlayerToState(id, name) {
+    gameState.players[id] = {
+        id: id, name: name, x: Math.random() * MAP_WIDTH, y: Math.random() * MAP_HEIGHT,
+        hp: 100, points: 0, color: `hsl(${Math.random()*360}, 100%, 60%)`,
+        input: {w:false, a:false, s:false, d:false}, mouse: {x:0, y:0}, isAdmin: false
+    };
+}
+
+function toggleLeaderboard() {
+    if (gameState && gameState.isTimeUp) return;
+    showLeaderboard = !showLeaderboard;
+    const lb = document.getElementById('leaderboard');
+    if(showLeaderboard) lb.classList.add('show');
+    else lb.classList.remove('show');
+}
+
+function reloadWeapon() {
+    if(isReloading || ammo === MAX_AMMO) return;
+    isReloading = true;
+    document.getElementById('center-msg').style.opacity = '1';
+    setTimeout(() => {
+        ammo = MAX_AMMO;
+        isReloading = false;
+        document.getElementById('center-msg').style.opacity = '0';
+        updateHUD();
+    }, 1500); 
+}
+
+function spawnParticles(x, y, color, count=10) {
+    for(let i=0; i<count; i++) {
+        gameState.particles.push({
+            x: x, y: y, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, life: 1.0, color: color
+        });
+    }
+}
+
+function handleShoot(playerId, mousePos, clientPos) {
+    const p = gameState.players[playerId];
+    if(!p || p.hp <= 0) return;
+    
+    let originX = p.x;
+    let originY = p.y;
+    let angle;
+    
+    if (clientPos !== undefined && clientPos.x !== undefined) {
+        originX = clientPos.x;
+        originY = clientPos.y;
+        angle = clientPos.a;
+    } else {
+        angle = Math.atan2(mousePos.y - p.y, mousePos.x - p.x);
+    }
+    
+    gameState.bullets.push({
+        owner: playerId, 
+        x: originX + Math.cos(angle)*20, 
+        y: originY + Math.sin(angle)*20,
+        vx: Math.cos(angle) * 15, 
+        vy: Math.sin(angle) * 15, 
+        life: 100
+    });
+}
+
+function hostUpdate() {
+    frameCount++; 
+    
+    if (gameState.adminMsgTimer !== undefined && gameState.adminMsgTimer > 0) {
+        gameState.adminMsgTimer--;
+        if (gameState.adminMsgTimer <= 0) gameState.adminMsg = "";
+    }
+
+    if (gameState.timeLeft > 0 && !gameState.isFrozen && !gameState.isTimeUp && gameState.status === 'playing') {
+        if (frameCount % 60 === 0) {
+            gameState.timeLeft--;
+            if (gameState.timeLeft <= 0) gameState.isTimeUp = true;
+        }
+    }
+
+    if (!gameState.isTimeUp) {
+        for(let id in gameState.players) {
+            let p = gameState.players[id];
+            if(p.hp <= 0) continue;
+            if(gameState.isFrozen && !p.isAdmin && id !== 'host') continue;
+
+            if(gameState.status === 'playing') {
+                const speed = 5;
+                if(p.input.w) p.y -= speed; if(p.input.s) p.y += speed;
+                if(p.input.a) p.x -= speed; if(p.input.d) p.x += speed;
+                p.x = Math.max(20, Math.min(MAP_WIDTH - 20, p.x));
+                p.y = Math.max(20, Math.min(MAP_HEIGHT - 20, p.y));
+            }
+        }
+    }
+
+    if (gameState.status === 'playing') {
+        for(let i = gameState.bullets.length - 1; i >= 0; i--) {
+            let b = gameState.bullets[i];
+            b.x += b.vx; b.y += b.vy; b.life--;
+            
+            let hit = false;
+            for(let id in gameState.players) {
+                if(id === b.owner) continue;
+                let p = gameState.players[id];
+                if(p.hp <= 0) continue;
+                
+                let dist = Math.hypot(p.x - b.x, p.y - b.y);
+                if(dist < 20) { 
+                    p.hp -= 20;
+                    spawnParticles(b.x, b.y, '#fff', 5);
+                    hit = true;
+                    if(p.hp <= 0) {
+                        spawnParticles(p.x, p.y, p.color, 30);
+                        if(gameState.players[b.owner]) gameState.players[b.owner].points += 10;
+                        setTimeout(() => {
+                            if(gameState.players[id]) {
+                                gameState.players[id].hp = 100;
+                                gameState.players[id].x = Math.random() * MAP_WIDTH;
+                                gameState.players[id].y = Math.random() * MAP_HEIGHT;
+                            }
+                        }, 2000);
+                    }
+                    break;
+                }
+            }
+            if(hit || b.life <= 0) gameState.bullets.splice(i, 1);
+        }
+
+        for(let i = gameState.particles.length - 1; i >= 0; i--) {
+            let pt = gameState.particles[i];
+            pt.x += pt.vx; pt.y += pt.vy; pt.life -= 0.05;
+            if(pt.life <= 0) gameState.particles.splice(i, 1);
+        }
+    }
+
+    if (frameCount % 2 === 0) {
+        const cleanPlayers = {};
+        for(let id in gameState.players) {
+            const p = gameState.players[id];
+            cleanPlayers[id] = {
+                n: p.name, x: p.x | 0, y: p.y | 0, h: p.hp, pt: p.points, c: p.color, mx: p.mouse.x | 0, my: p.mouse.y | 0
+            };
+        }
+        const cleanBullets = gameState.bullets.map(b => [b.x, b.y, b.vx, b.vy]);
+        const cleanParticles = gameState.particles.map(pt => [pt.x, pt.y, (pt.life * 100) | 0, pt.color, pt.vx, pt.vy]);
+
+        const stateMsg = { 
+            t: 's', 
+            s: { 
+                st: gameState.status, p: cleanPlayers, b: cleanBullets, pt: cleanParticles, 
+                f: gameState.isFrozen, a: gameState.adminMsg, tm: gameState.timeLeft, 
+                mt: gameState.maxTime, up: gameState.isTimeUp, db: gameState.isDisbanded
+            } 
+        };
+
+        for(let id in connections) {
+            if(connections[id].open) connections[id].send(stateMsg);
+        }
+    }
+}
+
+function gameLoop() {
+    if (gameState && gameState.isDisbanded) { location.reload(); return; }
+
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+        for(let k in keys) keys[k] = false;
+        mouse.down = false;
+    }
+
+    const me = gameState.players[myId];
+    
+    if (me && gameState.status === 'playing') {
+        camera.x = me.x - canvas.width / 2;
+        camera.y = me.y - canvas.height / 2;
+    } else {
+        camera.x = 0; camera.y = 0;
+    }
+
+    if (showFullMap) {
+        const scaleX = canvas.width / MAP_WIDTH;
+        const scaleY = canvas.height / MAP_HEIGHT;
+        const scale = Math.min(scaleX, scaleY) * 0.9;
+        const offsetX = (canvas.width - MAP_WIDTH * scale) / 2;
+        const offsetY = (canvas.height - MAP_HEIGHT * scale) / 2;
+        mouse.x = (screenMouse.x - offsetX) / scale;
+        mouse.y = (screenMouse.y - offsetY) / scale;
+    } else {
+        mouse.x = screenMouse.x + camera.x;
+        mouse.y = screenMouse.y + camera.y;
+    }
+
+    const panel = document.getElementById('admin-panel');
+    if(panel.style.display === 'block' && !panel.classList.contains('permanent')) {
+        for(let k in keys) keys[k] = false;
+    }
+
+    if(isHost) {
+        if(me) { 
+            me.input = {...keys}; me.mouse = {...mouse}; 
+            me.isAdmin = isAdminUnlocked || isHost;
+        }
+    } else {
+        // 【完全修正】ゲストの操作情報を毎フレーム(1/60秒)送信し、ホスト側の入力漏れ・操作カクつきをゼロにする
+        if(connection && connection.open) {
+            connection.send({ t: 'in', k: keys, m: { x: mouse.x | 0, y: mouse.y | 0 }, ad: isAdminUnlocked });
+        }
+        
+        for(let id in gameState.players) {
+            let p = gameState.players[id];
+            
+            if (id === myId) {
+                // 【完全修正】自分自身のローカル予測を100%優先させ、通信による強制引き戻しを防止
+                if (p.hp > 0 && gameState.status === 'playing' && !gameState.isTimeUp) {
+                    if (!gameState.isFrozen || isAdminUnlocked || isHost) {
+                        const speed = 5;
+                        if(keys.w) p.y -= speed;
+                        if(keys.s) p.y += speed;
+                        if(keys.a) p.x -= speed;
+                        if(keys.d) p.x += speed;
+                        p.x = Math.max(20, Math.min(MAP_WIDTH - 20, p.x));
+                        p.y = Math.max(20, Math.min(MAP_HEIGHT - 20, p.y));
+                    }
+                }
+                
+                // リスポーン等で距離が遠く離れた時(400px以上)だけ位置を合わせる
+                if(p.targetX !== undefined && p.targetY !== undefined) {
+                    let dist = Math.hypot(p.targetX - p.x, p.targetY - p.y);
+                    if (dist > 400) {
+                        p.x = p.targetX;
+                        p.y = p.targetY;
+                    }
+                }
+            } else if(p.targetX !== undefined && p.targetY !== undefined) {
+                let dist = Math.hypot(p.targetX - p.x, p.targetY - p.y);
+                if (dist > 400) {
+                    p.x = p.targetX;
+                    p.y = p.targetY;
+                } else {
+                    p.x += (p.targetX - p.x) * 0.3; 
+                    p.y += (p.targetY - p.y) * 0.3;
+                }
+            }
+        }
+        for(let b of gameState.bullets) { b.x += b.vx; b.y += b.vy; }
+        for(let pt of gameState.particles) { pt.x += pt.vx; pt.y += pt.vy; }
+    }
+
+    if (me && me.hp > 0 && gameState.status === 'playing' && !gameState.isTimeUp && (!gameState.isFrozen || isAdminUnlocked || isHost)) {
+        const canShoot = (isAdminUnlocked && adminNoReload) ? true : (ammo > 0);
+        
+        if(mouse.down && !isReloading && canShoot && Date.now() - lastShootTime > 150) {
+            if(!(isAdminUnlocked && adminNoReload)) ammo--;
+            lastShootTime = Date.now();
+            updateHUD();
+            
+            if(isHost) {
+                handleShoot(myId, mouse);
+            } else if(connection && connection.open) {
+                const p = gameState.players[myId];
+                const angle = Math.atan2(mouse.y - p.y, mouse.x - p.x);
+                connection.send({ 
+                    t: 'sh', 
+                    m: { x: mouse.x | 0, y: mouse.y | 0 },
+                    cp: { x: p.x, y: p.y, a: angle }
+                });
+            }
+            
+            if(ammo === 0 && !(isAdminUnlocked && adminNoReload)) reloadWeapon(); 
+        }
+    }
+
+    render();
+    updateHUD();
+    requestAnimationFrame(gameLoop);
+}
+
+// ================= Rendering =================
+function render() {
+    ctx.fillStyle = 'rgba(11, 12, 16, 0.4)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    
+    if (showFullMap) {
+        const scaleX = canvas.width / MAP_WIDTH;
+        const scaleY = canvas.height / MAP_HEIGHT;
+        const scale = Math.min(scaleX, scaleY) * 0.9;
+        const offsetX = (canvas.width - MAP_WIDTH * scale) / 2;
+        const offsetY = (canvas.height - MAP_HEIGHT * scale) / 2;
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(scale, scale);
+    } else {
+        ctx.translate(-camera.x, -camera.y);
+    }
+
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    for(let i=0; i<=MAP_WIDTH; i+=50) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,MAP_HEIGHT); ctx.stroke(); }
+    for(let i=0; i<=MAP_HEIGHT; i+=50) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(MAP_WIDTH,i); ctx.stroke(); }
+    
+    ctx.strokeStyle = 'rgba(255, 0, 85, 0.5)';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+
+    for(let id in gameState.players) {
+        let p = gameState.players[id];
+        if(p.hp <= 0) continue;
+
+        const isMe = id === myId;
+        const targetMouse = isMe ? mouse : p.mouse;
+        const angle = Math.atan2(targetMouse.y - p.y, targetMouse.x - p.x);
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(angle);
+
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = p.color;
+
+        ctx.fillStyle = '#ccc';
+        ctx.fillRect(10, -5, 20, 10);
+
+        ctx.beginPath();
+        ctx.arc(0, 0, 20, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.fillStyle = 'white';
+        ctx.font = showFullMap ? '24px sans-serif' : '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.name, p.x, p.y - (showFullMap ? 45 : 35));
+        
+        if(!isMe) {
+            ctx.fillStyle = '#333'; ctx.fillRect(p.x-20, p.y-25, 40, 5);
+            ctx.fillStyle = '#f05'; ctx.fillRect(p.x-20, p.y-25, 40 * (Math.max(0, p.hp)/100), 5);
+        }
+    }
+
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = '#0ff';
+    ctx.fillStyle = '#0ff';
+    for(let b of gameState.bullets) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.shadowBlur = 0; 
+
+    for(let pt of gameState.particles) {
+        ctx.fillStyle = pt.color;
+        ctx.globalAlpha = pt.life;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
+    ctx.restore(); 
+}
+
+function updateHUD() {
+    const me = gameState.players[myId];
+    if(!me) return;
+
+    if (gameState.status === 'waiting') {
+        const list = document.getElementById('wait-player-list');
+        if (list) {
+            list.innerHTML = Object.values(gameState.players).map(p => `<li>・ ${p.name}</li>`).join('');
+        }
+        
+        if (isHost) {
+            const btn = document.getElementById('btn-start-game');
+            btn.style.display = 'block';
+            if (Object.keys(gameState.players).length >= 2) {
+                btn.style.background = 'var(--primary)';
+                btn.style.cursor = 'pointer';
+                btn.disabled = false;
+                btn.innerText = 'ゲームを開始する';
+            } else {
+                btn.style.background = '#555';
+                btn.style.cursor = 'not-allowed';
+                btn.disabled = true;
+                btn.innerText = '2人以上で開始可能';
+            }
+        }
+    } 
+    else if (gameState.status === 'playing') {
+        const waitRoom = document.getElementById('waiting-room');
+        if (waitRoom.style.display !== 'none') {
+            waitRoom.style.display = 'none';
+            document.getElementById('game-ui').style.display = 'block';
+        }
+    }
+
+    document.getElementById('hp-bar').style.width = Math.max(0, me.hp) + '%';
+    document.getElementById('hp-text').innerText = Math.max(0, me.hp) + ' / 100';
+
+    document.getElementById('points-display').innerText = me.points;
+    document.getElementById('ammo-count').innerText = (isAdminUnlocked && adminNoReload) ? "∞" : ammo;
+
+    const freezeBtn = document.getElementById('btn-freeze');
+    const noReloadBtn = document.getElementById('btn-no-reload');
+    if(freezeBtn) freezeBtn.innerText = `停止機能: ${gameState.isFrozen ? 'ON' : 'OFF'}`;
+    if(noReloadBtn) noReloadBtn.innerText = `No Reload: ${adminNoReload ? 'ON' : 'OFF'}`;
+
+    if(showLeaderboard || (gameState && gameState.isTimeUp)) {
+        const sorted = Object.values(gameState.players).sort((a,b) => b.points - a.points);
+        let html = '';
+        sorted.forEach((p, index) => {
+            let rowStyle = "";
+            let rankStr = index + 1;
+            if (index === 0) {
+                rowStyle = "font-size: 26px; color: #ffd700; font-weight: 900; text-shadow: 0 0 10px #ffd700;";
+                rankStr = "👑 1";
+            }
+            html += `<div class="rank-row ${p.id === myId ? 'me' : ''}" style="${rowStyle}">
+                        <span>${rankStr}. ${p.name}</span>
+                        <span>${p.points} pt</span>
+                     </div>`;
+        });
+        document.getElementById('rank-list').innerHTML = html;
+    }
+}
+</script>
+</body>
+</html>
