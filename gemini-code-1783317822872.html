@@ -1,0 +1,3243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P 2D Shooter</title>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <style>
+        /* ================= UI & Animations ================= */
+        :root {
+            --primary: #0ff;
+            --danger: #f05;
+            --bg: #0b0c10;
+            --panel: rgba(31, 40, 51, 0.85);
+        }
+        body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; user-select: none; width: 100vw; height: 100vh; touch-action: none; }
+        
+        /* Lobby & Waiting Room */
+        #lobby, #waiting-room {
+            position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: radial-gradient(circle at center, #1f2833 0%, var(--bg) 100%);
+            z-index: 100; transition: opacity 0.5s ease;
+        }
+        #waiting-room { z-index: 150; display: none; }
+
+        .lobby-panel {
+            background: var(--panel); padding: 30px 40px; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,255,255,0.2);
+            backdrop-filter: blur(10px); border: 1px solid rgba(0, 255, 255, 0.1); text-align: center; width: 320px;
+        }
+        h1 { margin-top: 0; color: var(--primary); text-shadow: 0 0 10px var(--primary); font-size: 28px; }
+        input[type="text"], input[type="number"], select {
+            width: 100%; padding: 12px; margin: 8px 0; border: none; border-radius: 8px; background: rgba(0,0,0,0.5);
+            color: white; font-size: 16px; outline: none; border: 1px solid transparent; transition: 0.3s; box-sizing: border-box;
+        }
+        input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 10px rgba(0,255,255,0.5); }
+        button {
+            width: 100%; padding: 14px; margin: 8px 0; border: none; border-radius: 8px; background: var(--primary);
+            color: #000; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; box-sizing: border-box;
+        }
+        button:hover:not(:disabled) { background: white; box-shadow: 0 0 15px var(--primary); transform: translateY(-2px); }
+        .divider { margin: 15px 0; font-size: 14px; color: #aaa; position: relative; }
+        
+        /* Game UI */
+        #game-ui { display: none; position: absolute; inset: 0; pointer-events: none; z-index: 50; }
+        
+        /* Global Announcement */
+        #global-announcement {
+            position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+            font-size: 26px; font-weight: bold; color: #ffd700; text-shadow: 0 0 15px #f00, 0 0 30px #f00;
+            z-index: 300; text-align: center; pointer-events: none; display: none; background: rgba(0,0,0,0.85); padding: 12px 24px; border-radius: 8px; border: 1px solid var(--danger);
+        }
+
+        /* Timer */
+        #timer-display {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: var(--panel); padding: 10px 25px; border-radius: 8px; border-bottom: 3px solid var(--primary);
+            font-size: 22px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5); z-index: 150; display: none;
+        }
+
+        /* 管理者カスタムタイマー用UI */
+        #admin-custom-timer-display {
+            position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 255, 85, 0.15); padding: 15px 40px; border-radius: 12px; border: 3px solid #0f5;
+            font-size: 36px; font-weight: 900; text-shadow: 0 0 20px #0f5; z-index: 200; display: none; color: #0f5;
+            box-shadow: 0 0 30px rgba(0, 255, 85, 0.5); animation: pulseAdminTimer 1s infinite alternate;
+        }
+        @keyframes pulseAdminTimer { 
+            from { box-shadow: 0 0 15px rgba(0,255,85,0.3); transform: translateX(-50%) scale(1); } 
+            to { box-shadow: 0 0 50px rgba(0,255,85,0.8); transform: translateX(-50%) scale(1.05); } 
+        }
+
+        /* Host Choice Panel (After Time Up) */
+        #host-choice-panel {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: var(--panel); padding: 25px; border-radius: 16px; border: 2px solid var(--primary);
+            box-shadow: 0 0 30px rgba(0,255,255,0.3); z-index: 250; text-align: center; display: none; width: 320px; pointer-events: auto;
+        }
+        #host-choice-panel button { margin: 5px 0; }
+
+        /* Top Left: Points & Kill Log */
+        #top-left-ui { position: absolute; top: 120px; left: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 100;}
+        .hud-box {
+            background: var(--panel); padding: 15px 25px; border-radius: 8px; border-left: 4px solid var(--primary);
+            backdrop-filter: blur(5px); font-size: 24px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        #kill-log-container {
+            display: flex; flex-direction: column; align-items: flex-start; z-index: 90; pointer-events: none; margin-top: 5px;
+        }
+        .kill-log {
+            background: rgba(0, 0, 0, 0.6); padding: 5px 15px; border-radius: 4px; margin-bottom: 5px;
+            border-left: 3px solid #f05; color: white; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px #000;
+        }
+
+        /* Top Right Display & Leave Button */
+        #room-display { position: absolute; top: 20px; right: 20px; font-size: 18px; color: #aaa; display: flex; align-items: center; gap: 15px; }
+        .leave-btn {
+            pointer-events: auto; background: var(--danger); color: white; border: none; padding: 8px 16px;
+            font-size: 14px; font-weight: bold; cursor: pointer; border-radius: 6px; box-shadow: 0 4px 10px rgba(255,0,85,0.3); transition: 0.2s;
+        }
+        .leave-btn:hover { background: white; color: black; box-shadow: 0 0 15px white; transform: translateY(-1px); }
+
+        /* Bottom Left Area (Weapon & HP) */
+        #bottom-left-ui { position: absolute; bottom: 30px; left: 20px; display: flex; flex-direction: column; gap: 15px; z-index: 100;}
+        #weapon-row { display: flex; align-items: center; gap: 15px; }
+        #ammo-display { border-left-color: #ffd700; font-size: 18px; }
+
+        /* Reloading Text */
+        #center-msg {
+            font-size: 24px; font-weight: bold; color: #ffd700; text-shadow: 0 0 10px #ffd700;
+            opacity: 0; transition: opacity 0.2s; white-space: nowrap;
+        }
+
+        #hp-container {
+            width: 300px; background: rgba(0,0,0,0.6);
+            border-radius: 15px; padding: 10px; border: 1px solid rgba(255,255,255,0.1);
+        }
+        #hp-bar-bg { width: 100%; height: 20px; background: #333; border-radius: 10px; overflow: hidden; }
+        #hp-bar { width: 100%; height: 100%; background: linear-gradient(90deg, #f05, #ff007f); transition: width 0.2s ease-out; }
+        #hp-text { margin-top: 5px; font-size: 20px; font-weight: bold; display: block; }
+
+        /* Leaderboard */
+        #leaderboard {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9);
+            background: var(--panel); padding: 30px; border-radius: 16px; border: 1px solid var(--primary);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8); backdrop-filter: blur(10px); width: 400px;
+            opacity: 0; pointer-events: none; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 200;
+        }
+        #leaderboard.show { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: auto; }
+        #leaderboard h2 { margin-top: 0; text-align: center; border-bottom: 2px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
+        
+        /* ランキングのスクロール対応 */
+        #rank-list {
+            max-height: 45vh; 
+            overflow-y: auto; 
+            padding-right: 5px;
+        }
+        #rank-list::-webkit-scrollbar { width: 6px; }
+        #rank-list::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 3px; }
+
+        .rank-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 18px; align-items: center; }
+        .rank-row.me { color: var(--primary); font-weight: bold; }
+        #client-wait-msg { font-size: 18px; color: #ffd700; margin-top: 10px; text-align: center; font-weight: bold; display: none; text-shadow: 0 0 5px black; }
+
+        /* Admin Panel */
+        #admin-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(15, 20, 30, 0.95); padding: 25px; border-radius: 16px; border: 2px solid var(--primary);
+            display: none; z-index: 200; pointer-events: auto; width: 360px; text-align: center;
+            box-shadow: 0 10px 30px rgba(0,255,255,0.3); backdrop-filter: blur(10px);
+        }
+        #admin-panel.permanent {
+            position: absolute; top: 75px; right: 20px; left: auto; transform: none;
+            box-shadow: 0 0 20px rgba(255, 0, 85, 0.4); border-color: var(--danger);
+        }
+        .radio-group { text-align: left; margin: 10px 0; font-size: 14px; background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; }
+        .radio-group label { display: block; margin-bottom: 5px; cursor: pointer; color: #fff; }
+        .admin-input-box { width: 100%; padding: 10px; margin: 8px 0; border-radius: 6px; background: rgba(0,0,0,0.4); color: white; border: 1px solid #555; box-sizing: border-box; font-size: 14px; }
+
+        /* チート専用パネル */
+        #admin-cheat-panel {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(15, 20, 30, 0.95); padding: 25px; border-radius: 16px; border: 2px solid var(--danger);
+            display: none; z-index: 999; pointer-events: auto; width: 360px; text-align: center;
+            box-shadow: 0 10px 40px rgba(255,0,85,0.5); backdrop-filter: blur(10px);
+        }
+
+        /* Admin Player List Panel */
+        #admin-player-list-panel, #admin-history-list-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: var(--panel); padding: 20px; border-radius: 16px; border: 2px solid #80f;
+            display: none; z-index: 250; pointer-events: auto; width: 380px; text-align: center;
+            box-shadow: 0 0 30px rgba(128, 0, 255, 0.4);
+        }
+        
+        /* 管理者用プレイヤーリストのスクロール対応 */
+        #admin-player-list, #admin-history-list {
+            max-height: 250px; 
+            overflow-y: auto; 
+            border: 1px solid #444; 
+            border-radius: 6px; 
+            padding: 5px; 
+            background: rgba(0,0,0,0.3);
+        }
+        #admin-player-list::-webkit-scrollbar, #admin-history-list::-webkit-scrollbar { width: 6px; }
+        #admin-player-list::-webkit-scrollbar-thumb, #admin-history-list::-webkit-scrollbar-thumb { background: #80f; border-radius: 3px; }
+
+        .admin-player-item {
+            background: rgba(0,0,0,0.4); padding: 8px 12px; margin-bottom: 5px; border-radius: 6px; text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .admin-player-item input[type="number"] { width: 50px; padding: 2px; margin: 2px; text-align: center; font-size: 12px; background: rgba(0,0,0,0.5); border: 1px solid #555; color: white; }
+        .admin-player-item button { width: auto; padding: 4px 8px; margin: 2px; font-size: 12px; background: var(--danger); color: white; font-weight: normal; cursor: pointer; }
+        .admin-player-item label { font-size: 11px; margin-right: 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+
+        /* スマホ操作用UIレイヤー */
+        #mobile-controls {
+            display: none; position: absolute; inset: 0; pointer-events: none; z-index: 80;
+        }
+        .joystick-zone {
+            position: absolute; bottom: 0; width: 50%; height: 50%; pointer-events: auto;
+        }
+        #left-zone { left: 0; }
+        #right-zone { right: 0; }
+        .joystick-base {
+            position: absolute; width: 120px; height: 120px; background: rgba(0, 255, 255, 0.1);
+            border: 2px solid rgba(0, 255, 255, 0.3); border-radius: 50%; display: none; transform: translate(-50%, -50%);
+        }
+        .joystick-knob {
+            position: absolute; width: 50px; height: 50px; background: rgba(0, 255, 255, 0.6);
+            border-radius: 50%; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        }
+
+        /* ボスイベントUI (Lobby) */
+        #boss-event-panel {
+            margin: 15px 0; padding: 15px; border-radius: 12px; background: rgba(255, 0, 85, 0.15);
+            border: 2px solid var(--danger); text-align: center; box-shadow: 0 0 15px rgba(255,0,85,0.3);
+        }
+        #boss-timer-text { font-size: 16px; color: #fff; font-weight: bold; margin-bottom: 10px; }
+        #btn-join-boss {
+            background: linear-gradient(45deg, #f05, #90f); color: white; font-size: 18px; font-weight: 900;
+            text-shadow: 0 0 5px #000; animation: pulseBossBtn 0.5s infinite alternate; display: none; padding: 15px;
+            border: 2px solid #fff; box-shadow: 0 0 20px #f05; cursor: pointer; width: 100%; border-radius: 8px;
+            pointer-events: auto !important; position: relative; z-index: 100;
+        }
+        @keyframes pulseBossBtn { 
+            from { transform: scale(1); box-shadow: 0 0 15px #f05; } 
+            to { transform: scale(1.02); box-shadow: 0 0 25px #90f; } 
+        }
+
+        /* 左上グローバルボスタイマー */
+        #global-boss-timer-container {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(10, 0, 0, 0.85);
+            border: 2px solid var(--danger);
+            border-radius: 8px;
+            padding: 10px 15px;
+            z-index: 5000;
+            text-align: center;
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.5);
+            pointer-events: auto !important;
+        }
+
+        /* 宝箱（ガチャ）UI */
+        #chest-panel {
+            display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.9); z-index: 9999;
+            flex-direction: column; align-items: center; justify-content: center;
+            transition: background 1s ease;
+        }
+        .chest-opened-bg {
+            background: radial-gradient(circle, rgba(255,215,0,0.4) 0%, rgba(0,0,0,0.95) 70%) !important;
+        }
+        #chest-panel h1 { font-size: 36px; color: #ffd700; text-shadow: 0 0 30px #ffd700; margin-bottom: 30px; animation: bounce 1s infinite alternate; }
+        #btn-open-chest { font-size: 24px; padding: 20px 40px; background: linear-gradient(45deg, #f05, #90f); border: 3px solid #fff; box-shadow: 0 0 30px #f05; cursor: pointer; border-radius: 12px; color: white; font-weight: bold; margin-bottom: 20px; }
+        #btn-open-chest:hover { transform: scale(1.1); box-shadow: 0 0 50px #f05; }
+        #chest-result { display: none; text-align: center; animation: zoomIn 0.5s ease; }
+        #chest-result-text { font-size: 28px; font-weight: bold; margin-bottom: 30px; padding: 20px; border-radius: 10px; background: rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.2); }
+        @keyframes bounce { from { transform: translateY(0); } to { transform: translateY(-10px); } }
+        @keyframes zoomIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes shakeFast { 0% { transform: translate(2px, 1px) rotate(0deg); } 10% { transform: translate(-1px, -2px) rotate(-1deg); } 20% { transform: translate(-3px, 0px) rotate(1deg); } 30% { transform: translate(0px, 2px) rotate(0deg); } 40% { transform: translate(1px, -1px) rotate(1deg); } 50% { transform: translate(-1px, 2px) rotate(-1deg); } 60% { transform: translate(-3px, 1px) rotate(0deg); } 70% { transform: translate(2px, 1px) rotate(-1deg); } 80% { transform: translate(-1px, -1px) rotate(1deg); } 90% { transform: translate(2px, 2px) rotate(0deg); } 100% { transform: translate(1px, -2px) rotate(-1deg); } }
+
+        /* コレクション一新UI */
+        #collection-panel {
+            background: rgba(15, 20, 30, 0.95) !important;
+            border: 2px solid var(--primary);
+            box-shadow: 0 0 30px rgba(0,255,255,0.4);
+            width: 85% !important;
+            max-width: 600px !important;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .col-prob-box {
+            background: rgba(0,0,0,0.6); padding: 15px; border-radius: 12px; margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .prob-row {
+            display: flex; justify-content: space-between; margin-bottom: 5px; border-bottom: 1px solid #333; padding-bottom: 5px; font-size: 14px;
+        }
+        .col-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 15px; margin-top: 15px;
+        }
+        .col-card {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 12px; padding: 15px; text-align: center; transition: 0.3s;
+            display: flex; flex-direction: column; justify-content: space-between;
+        }
+        .col-card:hover { transform: translateY(-3px); border-color: var(--primary); box-shadow: 0 5px 15px rgba(0,255,255,0.3); }
+        .col-card h4 { margin: 5px 0; font-size: 13px; line-height: 1.2; }
+        .col-card p { font-size: 11px; color: #aaa; margin: 5px 0; line-height: 1.2; }
+        .col-card .count { font-size: 18px; font-weight: bold; color: var(--primary); margin: 5px 0;}
+        .equipped { box-shadow: 0 0 20px var(--primary) !important; background: rgba(0, 255, 255, 0.15) !important; border-color: var(--primary) !important;}
+        
+        /* ボスアラーム演出用オーバーレイ */
+        #boss-alarm-overlay {
+            position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+            display: none; flex-direction: column; justify-content: center; align-items: center;
+        }
+        .alarm-flash { animation: flashRed 0.5s infinite alternate; }
+        .cinematic::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 15%; background: #000; animation: slideDown 0.5s ease; }
+        .cinematic::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 15%; background: #000; animation: slideUp 0.5s ease; }
+        .warning-band { position: absolute; width: 100%; height: 40px; background: repeating-linear-gradient(45deg, #000, #000 20px, #f00 20px, #f00 40px); opacity: 0.5; }
+        .warning-band.top { top: 15%; }
+        .warning-band.bottom { bottom: 15%; }
+        
+        .alarm-text {
+            font-size: 80px; font-weight: 900; color: white; text-shadow: 0 0 30px red, 0 0 50px red;
+            animation: shakeFast 0.15s infinite; letter-spacing: 10px; margin: 0; text-align: center; position: relative; z-index: 10;
+        }
+        .alarm-subtext {
+            font-size: 30px; font-weight: bold; color: #ff0; text-shadow: 0 0 15px #ff0;
+            animation: shakeFast 0.2s infinite reverse; margin: 10px 0 0 0; text-align: center; position: relative; z-index: 10;
+        }
+        @keyframes flashRed { 0% { background: rgba(255,0,0,0.1); } 100% { background: rgba(255,0,0,0.7); } }
+        @keyframes slideDown { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+        canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+
+        /* ★リアルタイムオンライン人数表示（左下固定） */
+        #true-online-counter-ui {
+            position: absolute;
+            bottom: 25px;
+            left: 25px;
+            background: rgba(11, 12, 16, 0.9);
+            border: 2px solid #0ff;
+            border-radius: 12px;
+            padding: 12px 20px;
+            font-family: 'Segoe UI', monospace;
+            font-weight: bold;
+            color: #ffffff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5), inset 0 0 10px rgba(0, 255, 255, 0.2);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            pointer-events: none;
+            transition: all 0.3s ease;
+        }
+        .online-pulse-dot {
+            width: 12px;
+            height: 12px;
+            background-color: #39ff14;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #39ff14, 0 0 20px #39ff14;
+            animation: onlinePulse 1.5s infinite ease-in-out;
+        }
+        @keyframes onlinePulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.3); opacity: 1; }
+        }
+        .online-label { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: #0ff; display: block; }
+        .online-number { font-size: 24px; color: #fff; text-shadow: 0 0 10px rgba(0,255,255,0.8); font-weight: 900; }
+
+        /* 画面の激しい揺れ（スクリーンシェイク） */
+        .super-shake-active { animation: superScreenShake 0.4s cubic-bezier(.36,.07,.19,.97) both; transform: translate3d(0, 0, 0); backface-visibility: hidden; }
+        @keyframes superScreenShake {
+            10%, 90% { transform: translate3d(-5px, 3px, 0) rotate(-1deg); }
+            20%, 80% { transform: translate3d(7px, -5px, 0) rotate(1.5deg); }
+            30%, 50%, 70% { transform: translate3d(-9px, 7px, 0) rotate(-2deg); }
+            40%, 60% { transform: translate3d(9px, -7px, 0) rotate(2deg); }
+        }
+
+        /* 宝箱出現用エフェクトレイヤー */
+        #super-particle-canvas { position: absolute; inset: 0; z-index: 9997; pointer-events: none; }
+        .chest-spawn-banner-ui {
+            position: absolute; top: 25%; left: 50%; transform: translate(-50%, -50%) scale(0.6);
+            background: linear-gradient(90deg, rgba(255,215,0,0) 0%, rgba(255,215,0,0.85) 50%, rgba(255,215,0,0) 100%);
+            color: #fff; padding: 22px 120px; font-size: 40px; font-weight: 900; text-shadow: 0 0 20px #ffd700, 0 0 40px #ff8c00;
+            white-space: nowrap; opacity: 0; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 9996; pointer-events: none;
+        }
+        .chest-spawn-banner-ui.visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        
+        /* ★追加：塗装レアリティ用の輝きアニメーション */
+        @keyframes pulseThunder { 0%,100% {text-shadow: 0 0 10px #ffff00, 0 0 20px #ffff00; transform: scale(1);} 50% {text-shadow: 0 0 20px #ffff00, 0 0 40px #fff; transform: scale(1.05);} }
+        @keyframes pulseDiamond { 0%,100% {text-shadow: 0 0 10px #00ffff, 0 0 20px #00ffff;} 50% {text-shadow: 0 0 20px #00ffff, 0 0 40px #fff;} }
+        @keyframes pulseGold { 0%,100% {text-shadow: 0 0 10px #ffd700;} 50% {text-shadow: 0 0 20px #ffd700, 0 0 30px #fff;} }
+    </style>
+</head>
+<body>
+
+    <div id="boss-alarm-overlay">
+        <div class="warning-band top"></div>
+        <div class="alarm-text">WARNING</div>
+        <div class="alarm-subtext">BOSS APPROACHING</div>
+        <div class="warning-band bottom"></div>
+    </div>
+
+    <div id="chest-panel">
+        <h1>🎁 ボス討伐報酬 🎁</h1>
+        <button id="btn-open-chest" onclick="openChest()">宝箱を開ける</button>
+        <div id="chest-result">
+            <div id="chest-result-text"></div>
+            <button onclick="closeChestUI()" style="background:#555; padding:15px 40px; font-size:20px; color:white; border-radius:8px; font-weight:bold; cursor:pointer; margin-top:20px;">ロビーに戻る</button>
+        </div>
+    </div>
+
+    <div id="global-boss-timer-container">
+        <div style="color: #f05; font-size: 14px; font-weight: bold; text-shadow: 0 0 5px #f05; margin-bottom: 5px;">🔥 BOSS EVENT 🔥</div>
+        <div id="global-boss-timer-text" style="color: #fff; font-size: 16px; font-weight: bold;">計算中...</div>
+        <button id="global-btn-join-boss" onclick="joinBossMatch()" style="display: none; background: linear-gradient(45deg, #f05, #90f); color: white; border: 1px solid #fff; padding: 8px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 8px; width: 100%; box-shadow: 0 0 10px #f05; animation: pulseBossBtn 0.5s infinite alternate; pointer-events: auto !important;">参加する (25秒)</button>
+        <div style="font-size: 10px; color: #888; margin-top: 5px;">(Oキーで表示/非表示)</div>
+    </div>
+
+    <div id="global-announcement"></div>
+    <div id="timer-display">残り時間: --</div>
+    <div id="admin-custom-timer-display">⏳ 管理者タイマー: --</div>
+
+    <div id="host-choice-panel">
+        <h3 style="margin-top:0; color:var(--primary);">⏳ 制限時間終了</h3>
+        <p style="font-size:14px; color:#ccc; margin-bottom:15px;">次のゲームアクションを選択してください</p>
+        <button onclick="hostChooseContinue()" style="background:#0f5; color:black;">ゲームを続ける (リセット)</button>
+        <button onclick="hostChooseEnd()" style="background:var(--danger); color:white;">ゲームを終了する (解散)</button>
+    </div>
+
+    <div id="true-online-counter-ui">
+        <div class="online-pulse-dot"></div>
+        <div>
+            <span class="online-label">LIVE PLAYERS</span>
+            <div class="online-number" id="true-online-val">1</div>
+        </div>
+    </div>
+
+    <div id="lobby">
+        <div class="lobby-panel" id="mode-selection-panel">
+            <h1>NEON ARENA</h1>
+            
+            <div id="online-players-count" style="margin-bottom: 15px; color: #0f5; font-size: 14px; font-weight: bold; text-shadow: 0 0 5px rgba(0,255,0,0.5); background: rgba(0,255,0,0.1); padding: 8px; border-radius: 8px; border: 1px solid rgba(0,255,0,0.3);">🟢 現在のオンライン人数: 計算中...</div>
+            
+            <input type="text" id="global-player-name" placeholder="プレイヤー名 (ID) を入力" maxlength="10">
+            
+            <div id="boss-event-panel">
+                <h3 style="margin: 0 0 8px 0; font-size: 20px; color: #f05; text-shadow: 0 0 10px #f05;">🔥 巨大ボス討伐イベント 🔥</h3>
+                <div id="boss-timer-text">次のボス襲来まで計算中...</div>
+                
+                <div id="boss-difficulty-panel" style="display:none; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; margin: 10px 0;">
+                    <h4 style="color:#f05; margin:0 0 5px 0; font-size:14px;">👿 ボス難易度選択</h4>
+                    <select id="boss-diff-select" style="margin-bottom:5px; padding:8px; font-size:14px;">
+                        <option value="easy">弱い (HP半減 / 攻撃力低)</option>
+                        <option value="normal" selected>普通 (標準)</option>
+                        <option value="hard">強い (HP2倍 / 攻撃力高)</option>
+                    </select>
+                    <button onclick="rollBossDifficulty()" style="background: linear-gradient(45deg, #9b59b6, #8e44ad); padding:8px; font-size:14px;">🎲 ランダムで決める (強い確率UP)</button>
+                    <div id="boss-diff-result" style="margin-top:5px; font-size:12px; font-weight:bold; color:#ffd700;">現在の選択: 普通</div>
+                </div>
+
+                <button id="btn-join-boss" onclick="joinBossMatch()">⚔️ 巨大ボスに挑む (1vs1) <br><span style="font-size:12px;">残り25秒</span></button>
+            </div>
+            
+            <button id="btn-to-solo-setup" style="background: linear-gradient(45deg, #ff6600, #d35400); color:white; margin-top:15px; text-shadow: 0 1px 2px #000;">🤖 一人モード (ソロプレイ)</button>
+            
+            <button id="btn-multi-player" style="background:var(--primary); color:black; margin-top:10px;">🌐 マッチングモード (通信対戦)</button>
+            <button id="btn-settings" style="background:#444; color:white; margin-top:10px;">⚙️ 設定 (操作・FPS・音量)</button>
+            <button id="btn-collection" style="background:#80f; color:white; margin-top:10px;">🏆 コレクション</button>
+        </div>
+
+        <div class="lobby-panel" id="solo-setup-panel" style="display:none;">
+            <h1 style="font-size: 24px; color: #ff6600; text-shadow: 0 0 10px #ff6600;">🤖 一人モード設定</h1>
+            <div style="text-align:left; background:rgba(0,0,0,0.5); padding:15px; border-radius:8px; margin-bottom:15px; border: 1px solid rgba(255, 102, 0, 0.3);">
+                <label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Botの人数</label>
+                <input type="number" id="bot-count-input" value="5" min="1" max="50" style="margin:0 0 15px 0; padding:10px; width:100%;">
+                
+                <label style="font-size:12px; color:#aaa; display:block; margin-bottom:5px;">Botの強さ</label>
+                <select id="bot-strength-input" style="margin:0; padding:10px; width:100%;">
+                    <option value="easy">弱い</option>
+                    <option value="normal" selected>普通</option>
+                    <option value="hard">強い</option>
+                    <option value="crazy">最強</option>
+                </select>
+            </div>
+            <button id="btn-single-player" style="background:linear-gradient(45deg, #ff6600, #d35400); color:white; margin:0;">ゲーム開始</button>
+            <button onclick="backToLobbyFromSolo()" style="background:#555; color:white; margin-top:10px;">戻る</button>
+        </div>
+
+        <div class="lobby-panel" id="collection-panel" style="display:none;">
+            <h1 style="font-size:24px; color:#ffd700; text-shadow:0 0 10px #ffd700;">🏆 トロフィーコレクション</h1>
+            
+            <div class="col-prob-box">
+                <h3 style="margin:0 0 10px 0; color:#fff; font-size:14px; text-align:center;">🎁 ボス討伐宝箱 ドロップ確率</h3>
+                <div class="prob-row"><span style="color:#ffd700;">🏆 普通のトロフィー</span> <strong id="col-prob-normal">75%</strong></div>
+                <div class="prob-row"><span style="color:#0f5;">🟢 体力+50 トロフィー</span> <strong id="col-prob-hp">1%</strong></div>
+                <div class="prob-row"><span style="color:#f05;">🔴 攻撃力UP トロフィー</span> <strong id="col-prob-atk">5%</strong></div>
+                <div class="prob-row"><span style="color:#b0f;">🔮 運UP トロフィー</span> <strong id="col-prob-luck">19%</strong></div>
+                <div style="font-size:10px; color:#888; text-align:right; margin-top:5px;">※運UPトロフィー所持でレア確率が変動します</div>
+            </div>
+
+            <div class="col-grid" id="col-card-grid"></div>
+
+            <div style="background:rgba(0,0,0,0.5); padding:10px; border-radius:8px; margin-top:15px;">
+                <p style="color:#0f5; font-size:14px; font-weight:bold; margin:0;">現在装備中: <span id="current-equip-text" style="color:#fff;">なし</span></p>
+                <div style="font-size:11px; color:#aaa; margin-top:5px;">※装備した効果はBOSSマッチでのみ有効です</div>
+            </div>
+            
+            <div style="display:flex; gap:10px; margin-top:15px;">
+                <button onclick="equipTrophy('')" style="background:#555; flex:1;">装備を外す</button>
+                <button onclick="closeCollection()" style="background:#333; flex:1;">戻る</button>
+            </div>
+        </div>
+
+        <div class="lobby-panel" id="multiplayer-panel" style="display:none;">
+            <h1 style="font-size: 24px;">マッチングモード</h1>
+            <input type="number" id="game-duration-input" placeholder="制限時間 (秒) ※空欄で無限" min="5">
+            <button id="btn-host">部屋を作成する</button>
+            <div class="divider">または</div>
+            <input type="number" id="room-id-input" placeholder="部屋番号 (数字) を入力">
+            <button id="btn-join">部屋に参加する</button>
+            <button id="btn-back-mode" style="background:#555; margin-top:15px; color:white;">戻る</button>
+            <p id="lobby-status" style="color: var(--danger); font-size: 14px; font-weight: bold; margin-top: 15px;"></p>
+        </div>
+
+        <div class="lobby-panel" id="settings-panel" style="display:none;">
+            <h1 style="font-size: 24px;">⚙️ 設定</h1>
+            <div style="margin-bottom: 15px; text-align: left;">
+                <label style="font-size:14px; color:#ccc; display:block; margin-bottom:5px;">プレイ機種・操作方法</label>
+                <div class="radio-group" style="padding: 10px; border: 1px solid var(--primary);">
+                    <label><input type="radio" name="device-type" value="pc" checked> 💻 PC (キーボード＆マウス)</label>
+                    <label style="margin-top: 8px;"><input type="radio" name="device-type" value="keytouch"> ⌨️👆 キーボード＆タッチ (移動:キー, 狙う:タッチ)</label>
+                    <label style="margin-top: 8px;"><input type="radio" name="device-type" value="mobile"> 📱 スマホ/タブレット (画面両手タッチ)</label>
+                    <label style="margin-top: 8px;"><input type="radio" name="device-type" value="gamepad"> 🎮 コントローラー (Gamepad)</label>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 15px; text-align: left;">
+                <label style="font-size:14px; color:#ccc; display:block; margin-bottom:5px;">🔊 音量設定 (BGM / SE)</label>
+                <div style="display:flex; gap:10px; align-items:center; background:rgba(0,0,0,0.3); padding:10px; border-radius:8px;">
+                    <span style="font-size:12px; font-weight:bold;">BGM</span>
+                    <input type="range" id="bgm-volume" min="0" max="1" step="0.05" value="0.5" style="margin:0; flex:1;">
+                    <span style="font-size:12px; font-weight:bold; margin-left:10px;">SE</span>
+                    <input type="range" id="se-volume" min="0" max="1" step="0.05" value="0.5" style="margin:0; flex:1;">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 15px; text-align: left;">
+                <label style="font-size:14px; color:#ccc; display:block; margin-bottom:5px;">サーバーFPS (ゲームの滑らかさ)</label>
+                <select id="fps-setting" style="margin:0;">
+                    <option value="30">30 FPS (軽量)</option>
+                    <option value="60" selected>60 FPS (標準)</option>
+                    <option value="90">90 FPS (滑らか)</option>
+                    <option value="120">120 FPS (超滑らか)</option>
+                </select>
+            </div>
+            <button id="btn-back-settings" style="background:#555; color:white; margin-top:10px;">完了して戻る</button>
+        </div>
+    </div>
+
+    <div id="waiting-room">
+        <div class="lobby-panel" style="width: 400px;">
+            <h1>WAITING ROOM</h1>
+            <h2 style="margin: 10px 0;">Room: <span id="wait-room-id"></span></h2>
+            
+            <div style="background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; text-align: left; max-height: 200px; overflow-y: auto;">
+                <h3 style="margin-top: 0; border-bottom: 1px solid var(--primary); padding-bottom: 5px; color:white;">参加中のプレイヤー</h3>
+                <ul id="wait-player-list" style="list-style: none; padding: 0; margin: 0; font-size: 18px; line-height: 1.8; color: var(--primary); font-weight: bold;"></ul>
+            </div>
+            <button id="btn-start-game" onclick="startActualGame()" style="display:none; width: 100%; margin-top: 20px; background:#555; cursor:not-allowed;" disabled>2人以上で開始可能</button>
+            <p id="wait-status-msg" style="color: #aaa; margin-top: 15px;">ホストの開始を待っています...</p>
+        </div>
+    </div>
+
+    <div id="admin-panel" style="background: rgba(15, 20, 30, 0.95); border: 2px solid var(--primary); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,255,255,0.3); backdrop-filter: blur(10px);">
+        <h2 style="color:var(--primary); margin-bottom:10px; font-size:20px; text-align:center; border-bottom:1px solid rgba(0,255,255,0.3); padding-bottom:10px;">🛠️ ADMIN PANEL</h2>
+        
+        <button onclick="openAdminCheatPanel()" style="background: linear-gradient(45deg, #f05, #90f); width:100%; margin:5px 0 15px 0; color:white; font-weight:bold; padding:12px; border-radius:6px; cursor:pointer;">⚙️ チート・プレイヤー干渉設定</button>
+
+        <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+            <input type="number" id="admin-hp-input" class="admin-input-box" placeholder="自分のHPを指定 (例: 9999)" style="margin:0; flex: 1;">
+            <button onclick="adminSetHP()" style="background:#0f5; color:black; margin:0; padding: 10px; width: 70px;">変更</button>
+        </div>
+        <input type="text" id="admin-msg-input" class="admin-input-box" placeholder="画面に表示するメッセージ">
+        
+        <hr style="border-color: rgba(255,255,255,0.1); margin: 15px 0;">
+        <h4 style="color:var(--primary); margin:5px 0; text-align:left; font-size:13px;">⏱️ カスタムタイマー</h4>
+        <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+            <input type="number" id="admin-timer-input" class="admin-input-box" placeholder="タイマー(秒)" style="margin:0; flex: 1;">
+            <button onclick="sendAdminTimer()" style="background:#0f5; color:black; margin:0; padding: 10px; width: 70px;">開始</button>
+        </div>
+
+        <div class="radio-group">
+            <label><input type="radio" name="msg-scope" value="room" checked> この部屋のみ (This Room)</label>
+            <label><input type="radio" name="msg-scope" value="global"> 全員 (全サーバー共通)</label>
+        </div>
+        <button onclick="sendAdminMessage()" style="background:#ffd700; color:black; margin:5px 0; width:100%;">メッセージ送信</button>
+        
+        <button onclick="triggerAdminBoss()" style="background:linear-gradient(45deg, #f05, #90f); width:100%; margin:5px 0; color:white; font-weight:bold; padding:10px; border-radius:6px; cursor:pointer;">🔥 巨大ボス強制襲来 (25秒)</button>
+
+        <hr style="border-color: rgba(255,255,255,0.1); margin: 15px 0;">
+        
+        <button onclick="toggleAdminPlayerList()" style="background:#80f; margin:5px 0; color:white; width:100%;">プレイヤー一覧 (個別管理)</button>
+        <button onclick="toggleAdminHistoryList()" style="background:#d05; margin:5px 0; color:white; width:100%;">👤 履歴＆BAN管理</button>
+        
+        <button id="btn-freeze" onclick="toggleFreeze()" style="background:var(--danger); margin:5px 0;">停止機能: OFF</button>
+        <button id="btn-no-reload" onclick="toggleNoReload()" style="background:#555; margin:5px 0; color:white;">No Reload: OFF</button>
+        <button id="btn-admin-close" onclick="toggleAdminPanel()" style="background:#aaa; margin-top:10px; width:100%;">閉じる</button>
+    </div>
+
+    <div id="admin-cheat-panel" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(15, 20, 30, 0.95); border: 2px solid var(--danger); border-radius: 12px; padding: 25px; width: 340px; z-index: 999; box-shadow: 0 10px 40px rgba(255,0,85,0.5); backdrop-filter: blur(10px); text-align:center;">
+        <h2 style="color: #f05; margin-top:0;">⚙️ チート・干渉設定</h2>
+        <p style="font-size: 12px; color: #aaa; margin-top: 0; margin-bottom: 20px;">ゲームのルールを無視する強力なコマンド群です。</p>
+
+        <button id="btn-freeze" onclick="toggleFreeze()" style="width:100%; background:var(--danger); margin:10px 0; padding: 15px; font-size: 16px; font-weight: bold; border-radius: 8px; color:white; border:none; cursor:pointer;">停止機能: OFF</button>
+        <p style="font-size: 11px; color: #888; margin: 0 0 15px 0; text-align:left;">※全プレイヤー・敵の動きを完全に止めます。</p>
+
+        <button id="btn-no-reload" onclick="toggleNoReload()" style="width:100%; background:#555; margin:10px 0; padding: 15px; font-size: 16px; font-weight: bold; border-radius: 8px; color:white; border:none; cursor:pointer;">No Reload: OFF</button>
+        <p style="font-size: 11px; color: #888; margin: 0 0 15px 0; text-align:left;">※自分自身の弾薬が無限になりリロードが不要になります。</p>
+
+        <hr style="border-color: rgba(255,255,255,0.1); margin: 20px 0;">
+        <button onclick="closeAdminCheatPanel()" style="width:100%; background:#aaa; padding: 12px; border-radius:8px; font-weight:bold; color:black; border:none; cursor:pointer;">戻る</button>
+    </div>
+
+    <div id="admin-player-list-panel">
+        <h3 style="margin-top:0; color:var(--primary);">プレイヤー一覧</h3>
+        <div id="admin-player-list"></div>
+        <button onclick="toggleAdminPlayerList()" style="background:#555; color:white; margin-top:15px;">閉じる</button>
+    </div>
+
+    <div id="admin-history-list-panel">
+        <h3 style="margin-top:0; color:#d05;">👤 履歴＆BAN管理</h3>
+        <p style="font-size:11px; color:#aaa; margin-top:0; margin-bottom:10px;">このゲームを開いた全プレイヤーの履歴です</p>
+        <div id="admin-history-list"></div>
+        <button onclick="toggleAdminHistoryList()" style="background:#555; color:white; margin-top:15px;">閉じる</button>
+    </div>
+
+    <div id="game-ui">
+        <div id="top-left-ui">
+            <div class="hud-box">Points: <span id="points-display">0</span></div>
+            <div style="color:#aaa; font-size:14px; font-weight:bold; margin-top:5px; text-shadow: 0 1px 2px black;" id="map-hint">[M] キーで全体マップ</div>
+            <div id="kill-log-container"></div>
+        </div>
+        
+        <div id="room-display">
+            Room: <span id="room-number"></span>
+            <button class="leave-btn" id="btn-leave-normal" onclick="location.reload()">部屋を退出</button>
+            <button class="leave-btn" id="btn-leave-host" onclick="hostDisbandRoom(true)" style="display:none; background:#333;">部屋を解散</button>
+        </div>
+        
+        <div id="bottom-left-ui">
+            <div id="weapon-row">
+                <div class="hud-box" id="ammo-display">Ammo: <span id="ammo-count">30</span>/∞ <span style="font-size:12px" id="reload-hint">[R] Reload</span></div>
+                <div id="center-msg">RELOADING...</div>
+            </div>
+            <div id="hp-container">
+                <div id="hp-bar-bg"><div id="hp-bar"></div></div>
+                <span id="hp-text">100 / 100</span>
+            </div>
+        </div>
+        
+        <div id="leaderboard">
+            <h2>ランキング</h2>
+            <div id="rank-list"></div>
+            <div id="client-wait-msg">ホストの選択を待っています...</div>
+            <p style="text-align:center; font-size:12px; color:#aaa; margin-bottom:0; margin-top: 15px;">[B] を押して閉じる</p>
+        </div>
+
+        <div id="mobile-controls">
+            <div class="joystick-zone" id="left-zone">
+                <div class="joystick-base" id="joy-base-left"><div class="joystick-knob" id="joy-knob-left"></div></div>
+            </div>
+            <div class="joystick-zone" id="right-zone">
+                <div class="joystick-base" id="joy-base-right"><div class="joystick-knob" id="joy-knob-right"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <canvas id="super-particle-canvas"></canvas>
+
+    <div class="chest-spawn-banner-ui" id="chest-super-banner">🌟 MYSTICAL CHEST SPAWNED 🌟</div>
+
+<script>
+/**
+ * P2P & Game Logic 
+ */
+const PREFIX = 'neon_arena_room_'; 
+let peer = null;
+let connections = {}; 
+let connection = null; 
+
+const globalPeerConfig = {
+    'iceServers': [
+        { urls: 'stun:stun.l.google.com:19302' }, 
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
+    ]
+};
+
+// マップサイズ
+let currentMapWidth = 2500;
+let currentMapHeight = 2500;
+
+let myId = null;
+let myName = "";
+let isHost = false;
+let isSinglePlayerMode = false; 
+let isMobile = false; 
+let isKeyboardAndTouch = false;
+let isGamepadMode = false; 
+let gameFps = 60;
+let hostIntervalId = null;
+
+let roomNumber = "";
+let frameCount = 0; 
+let clientTickCount = 0; 
+let networkSendTimer = 0; 
+const NETWORK_SEND_INTERVAL = 1 / 30; 
+let lastFrameTime = performance.now();
+
+let camera = { x: 0, y: 0 };
+const keys = { w:false, a:false, s:false, d:false };
+let screenMouse = { x: 0, y: 0 }; 
+const mouse = { x: 0, y: 0, down: false }; 
+let showLeaderboard = false;
+let showFullMap = false; 
+let showBossTimerOverlay = false; 
+
+const MAX_AMMO = 30;
+let ammo = MAX_AMMO;
+let isReloading = false;
+let lastShootTime = 0;
+let adminNoReload = false; 
+
+let inputBuffer = "";
+let isAdminUnlocked = false;
+let globalMasterPeer = null; 
+let globalMasterConnections = []; 
+
+let globalAdminCustomTimer = 0;
+
+// ボスイベント用グローバル変数
+let bossJoinDeadline = 0;
+const BOSS_CYCLE_MS = 20 * 60 * 1000; // 20分
+const BOSS_WINDOW_MS = 25 * 1000; // 25秒
+let wasBossActive = false; 
+
+let bossDifficultySetting = 'normal'; // 難易度設定変数
+
+let gameState = {
+    status: 'waiting', 
+    players: {},
+    bullets: [],
+    particles: [],
+    killLogs: [], 
+    isFrozen: false,
+    adminMsg: "",
+    adminCustomTimer: 0, 
+    maxTime: 0,
+    timeLeft: 0,
+    isTimeUp: false,
+    isDisbanded: false,
+    bossDifficulty: 'normal'
+};
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas(); 
+
+const lobby = document.getElementById('lobby');
+const gameUi = document.getElementById('game-ui');
+const statusText = document.getElementById('lobby-status');
+
+// ================= オーディオ制御 (アラーム・宝箱等) =================
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function playSound(type) {
+    let seVol = parseFloat(document.getElementById('se-volume')?.value || 0.5);
+    if(seVol <= 0) return;
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    let now = audioCtx.currentTime;
+    
+    if (type === 'alarm') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.linearRampToValueAtTime(800, now + 0.3);
+        gain.gain.setValueAtTime(seVol * 0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        osc.start(now); osc.stop(now + 0.5);
+    } else if (type === 'chest') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(523.25, now); 
+        osc.frequency.setValueAtTime(659.25, now + 0.1); 
+        osc.frequency.setValueAtTime(783.99, now + 0.2); 
+        gain.gain.setValueAtTime(seVol * 0.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        osc.start(now); osc.stop(now + 0.5);
+    } else if (type === 'shoot') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+        gain.gain.setValueAtTime(seVol * 0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now); osc.stop(now + 0.1);
+    }
+}
+
+function triggerBossAlarmUI() {
+    const overlay = document.getElementById('boss-alarm-overlay');
+    if(!overlay) return;
+    overlay.style.display = 'flex';
+    overlay.classList.add('alarm-flash', 'cinematic');
+    
+    document.body.classList.add('super-shake-active');
+    setTimeout(() => document.body.classList.remove('super-shake-active'), 400);
+
+    let count = 0;
+    let interval = setInterval(() => {
+        playSound('alarm');
+        document.body.classList.add('super-shake-active');
+        setTimeout(() => document.body.classList.remove('super-shake-active'), 400);
+
+        count++;
+        if(count >= 6) {
+            clearInterval(interval);
+            overlay.style.display = 'none';
+            overlay.classList.remove('alarm-flash', 'cinematic');
+        }
+    }, 600);
+}
+
+// ================= 設定保存・読み込み =================
+const STORAGE_KEY = 'neon_arena_settings';
+const HISTORY_KEY = 'neon_arena_player_history'; 
+
+function saveSettings() {
+    const settings = {
+        name: document.getElementById('global-player-name')?.value || "",
+        botCount: document.getElementById('bot-count-input')?.value || "5",
+        botStrength: document.getElementById('bot-strength-input')?.value || "normal",
+        duration: document.getElementById('game-duration-input')?.value || "",
+        roomId: document.getElementById('room-id-input')?.value || "",
+        device: document.querySelector('input[name="device-type"]:checked')?.value || "pc",
+        fps: document.getElementById('fps-setting')?.value || "60",
+        bgmVol: document.getElementById('bgm-volume')?.value || "0.5",
+        seVol: document.getElementById('se-volume')?.value || "0.5"
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+}
+
+function loadSettings() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            const settings = JSON.parse(saved);
+            if(settings.name) document.getElementById('global-player-name').value = settings.name;
+            if(settings.botCount) document.getElementById('bot-count-input').value = settings.botCount;
+            if(settings.botStrength) document.getElementById('bot-strength-input').value = settings.botStrength;
+            if(settings.duration) document.getElementById('game-duration-input').value = settings.duration;
+            if(settings.roomId) document.getElementById('room-id-input').value = settings.roomId;
+            if(settings.device) {
+                const radio = document.querySelector(`input[name="device-type"][value="${settings.device}"]`);
+                if(radio) radio.checked = true;
+            }
+            if(settings.fps) document.getElementById('fps-setting').value = settings.fps;
+            if(settings.bgmVol) document.getElementById('bgm-volume').value = settings.bgmVol;
+            if(settings.seVol) document.getElementById('se-volume').value = settings.seVol;
+        }
+    } catch(e) {}
+}
+
+function saveAdminState() {
+    if (isAdminUnlocked) {
+        localStorage.setItem('neon_arena_admin_unlocked', 'true');
+    }
+}
+
+function loadAdminState() {
+    if (localStorage.getItem('neon_arena_admin_unlocked') === 'true') {
+        isAdminUnlocked = true;
+    }
+}
+
+// 宝箱チェック & 新ガチャロジック
+function checkPendingChest() {
+    if(localStorage.getItem('pending_boss_chest') === 'true') {
+        document.getElementById('chest-panel').style.display = 'flex';
+    }
+}
+function openChest() {
+    let btn = document.getElementById('btn-open-chest');
+    btn.disabled = true;
+    btn.innerText = "📦 解錠中...";
+    btn.style.animation = "shakeFast 0.1s infinite";
+    
+    let rollCount = 0;
+    let rollInt = setInterval(() => {
+        playSound('shoot'); 
+        rollCount++;
+        if(rollCount > 15) {
+            clearInterval(rollInt);
+            btn.style.animation = "none";
+            showChestResult();
+        }
+    }, 100);
+}
+
+function showChestResult() {
+    playSound('chest');
+    document.body.classList.add('super-shake-active');
+    setTimeout(() => document.body.classList.remove('super-shake-active'), 400);
+
+    if (typeof triggerSuperChestCollectEffects === 'function') {
+        triggerSuperChestCollectEffects();
+    }
+
+    let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"hp_trophy":0, "normal_trophy":0, "atk_trophy":0, "luck_trophy":0, "equipped":""}');
+    
+    let luckCount = col.luck_trophy || 0;
+    let probNormal = Math.max(0, 75 - (luckCount * 2));
+    let probHp = 1 + (luckCount * 1.0);
+    let probLuck = 19 + (luckCount * 0.5);
+    let probAtk = 5 + (luckCount * 0.5);
+    let total = probNormal + probHp + probLuck + probAtk;
+
+    let r = Math.random() * total;
+    let result = '';
+    let resultText = document.getElementById('chest-result-text');
+
+    if (r < probAtk) {
+        result = 'atk_trophy';
+        resultText.innerHTML = '🔴 超激レア<br>攻撃力UP トロフィー をゲット！<br><span style="font-size:14px;">(攻撃力+20)</span>';
+        resultText.style.color = '#f05';
+    } else if (r < probAtk + probHp) {
+        result = 'hp_trophy';
+        resultText.innerHTML = '🟢 超激レア<br>体力+50 トロフィー をゲット！<br><span style="font-size:14px;">(最大HP+50)</span>';
+        resultText.style.color = '#0f5';
+    } else if (r < probAtk + probHp + probLuck) {
+        result = 'luck_trophy';
+        resultText.innerHTML = '🔮 レア<br>運UP トロフィー をゲット！<br><span style="font-size:14px;">(レア確率UP)</span>';
+        resultText.style.color = '#b0f';
+    } else {
+        result = 'normal_trophy';
+        resultText.innerHTML = '🏆 普通のトロフィー をゲット！<br><span style="font-size:14px;">(名誉の証)</span>';
+        resultText.style.color = '#ffd700';
+    }
+    
+    col[result] = 1;
+    localStorage.setItem('neon_arena_collection', JSON.stringify(col));
+    
+    localStorage.removeItem('pending_boss_chest');
+    document.getElementById('btn-open-chest').style.display = 'none';
+    document.getElementById('chest-result').style.display = 'block';
+    document.getElementById('chest-panel').classList.add('chest-opened-bg');
+    updateCollectionUI();
+}
+
+function closeChestUI() {
+    document.getElementById('chest-panel').style.display = 'none';
+    document.getElementById('chest-panel').classList.remove('chest-opened-bg');
+    let btn = document.getElementById('btn-open-chest');
+    btn.disabled = false;
+    btn.innerText = "宝箱を開ける";
+    btn.style.display = 'block';
+    document.getElementById('chest-result').style.display = 'none';
+}
+
+window.addEventListener('load', () => {
+    loadSettings();
+    loadAdminState(); 
+    checkPendingChest();
+    document.body.addEventListener('input', saveSettings);
+    document.body.addEventListener('change', saveSettings);
+});
+
+// ================= プレイヤー履歴の記録 =================
+function recordPlayerHistory(id, name) {
+    if (!id || !name) return;
+    try {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}');
+        history[id] = {
+            name: name,
+            lastSeen: Date.now(),
+            isBanned: history[id] ? history[id].isBanned : false
+        };
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    } catch(e) {}
+}
+
+function checkIsBanned(id) {
+    try {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}');
+        return history[id] ? history[id].isBanned : false;
+    } catch(e) {
+        return false;
+    }
+}
+
+// ================= ロビーUI操作 =================
+document.getElementById('btn-settings').addEventListener('click', () => {
+    document.getElementById('mode-selection-panel').style.display = 'none';
+    document.getElementById('settings-panel').style.display = 'block';
+});
+
+document.getElementById('btn-back-settings').addEventListener('click', () => {
+    const device = document.querySelector('input[name="device-type"]:checked').value;
+    isMobile = (device === 'mobile');
+    isKeyboardAndTouch = (device === 'keytouch');
+    isGamepadMode = (device === 'gamepad'); 
+    gameFps = parseInt(document.getElementById('fps-setting').value) || 60;
+    
+    if(isMobile) {
+        document.getElementById('map-hint').innerText = "※スマホ版はマップ機能省略";
+        document.getElementById('reload-hint').innerText = "※弾切れで自動リロード";
+    } else if(isKeyboardAndTouch) {
+        document.getElementById('map-hint').innerText = "[M] キーで全体マップ";
+        document.getElementById('reload-hint').innerText = "※画面タッチで射撃";
+    } else if(isGamepadMode) {
+        document.getElementById('map-hint').innerText = "※L1でマップ表示切替";
+        document.getElementById('reload-hint').innerText = "※X/□でリロード、R1/R2射撃";
+    } else {
+        document.getElementById('map-hint').innerText = "[M] キーで全体マップ";
+        document.getElementById('reload-hint').innerText = "[R] Reload";
+    }
+    
+    document.getElementById('settings-panel').style.display = 'none';
+    document.getElementById('mode-selection-panel').style.display = 'block';
+});
+
+document.getElementById('btn-multi-player').addEventListener('click', () => {
+    document.getElementById('mode-selection-panel').style.display = 'none';
+    document.getElementById('multiplayer-panel').style.display = 'block';
+});
+
+document.getElementById('btn-back-mode').addEventListener('click', () => {
+    document.getElementById('multiplayer-panel').style.display = 'none';
+    document.getElementById('mode-selection-panel').style.display = 'block';
+});
+
+document.getElementById('btn-to-solo-setup').addEventListener('click', () => {
+    document.getElementById('mode-selection-panel').style.display = 'none';
+    document.getElementById('solo-setup-panel').style.display = 'block';
+});
+function backToLobbyFromSolo() {
+    document.getElementById('solo-setup-panel').style.display = 'none';
+    document.getElementById('mode-selection-panel').style.display = 'block';
+}
+
+// コレクション機能 & UI一新
+document.getElementById('btn-collection').addEventListener('click', () => {
+    document.getElementById('mode-selection-panel').style.display = 'none';
+    document.getElementById('collection-panel').style.display = 'block';
+    updateCollectionUI();
+});
+function closeCollection() {
+    document.getElementById('collection-panel').style.display = 'none';
+    document.getElementById('mode-selection-panel').style.display = 'block';
+}
+
+function updateCollectionUI() {
+    let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"hp_trophy":0, "normal_trophy":0, "atk_trophy":0, "luck_trophy":0, "equipped":""}');
+    
+    let luckCount = col.luck_trophy || 0;
+    let pNormal = Math.max(0, 75 - (luckCount * 2));
+    let pAtk = 5 + (luckCount * 0.5);
+    let pLuck = 19 + (luckCount * 0.5);
+    let pHp = 1 + (luckCount * 1.0);
+    let total = pNormal + pAtk + pLuck + pHp;
+    
+    document.getElementById('col-prob-normal').innerText = ((pNormal/total)*100).toFixed(1) + '%';
+    document.getElementById('col-prob-hp').innerText = ((pHp/total)*100).toFixed(1) + '%';
+    document.getElementById('col-prob-atk').innerText = ((pAtk/total)*100).toFixed(1) + '%';
+    document.getElementById('col-prob-luck').innerText = ((pLuck/total)*100).toFixed(1) + '%';
+    
+    let grid = document.getElementById('col-card-grid');
+    grid.innerHTML = `
+        <div class="col-card ${col.equipped === 'normal_trophy' ? 'equipped' : ''}" style="border-color: ${col.normal_trophy ? '#ffd700' : '#444'}; opacity: ${col.normal_trophy ? 1 : 0.5};">
+            <div style="font-size:30px;">🏆</div>
+            <h4 style="color:#ffd700;">普通のトロフィー</h4>
+            <p>名誉の証。</p>
+            <div class="count">所持: ${col.normal_trophy || 0}</div>
+            ${col.normal_trophy ? `<button onclick="equipTrophy('normal_trophy')" style="padding:5px; font-size:12px; margin-top:5px; background:#444; border:none; cursor:pointer; color:white; border-radius:4px;">装備</button>` : ''}
+        </div>
+        <div class="col-card ${col.equipped === 'hp_trophy' ? 'equipped' : ''}" style="border-color: ${col.hp_trophy ? '#0f5' : '#444'}; opacity: ${col.hp_trophy ? 1 : 0.5};">
+            <div style="font-size:30px;">🟢</div>
+            <h4 style="color:#0f5;">体力+50 トロフィー</h4>
+            <p>BOSS戦で最大HP+50</p>
+            <div class="count">所持: ${col.hp_trophy || 0}</div>
+            ${col.hp_trophy ? `<button onclick="equipTrophy('hp_trophy')" style="padding:5px; font-size:12px; margin-top:5px; background:#444; border:none; cursor:pointer; color:white; border-radius:4px;">装備</button>` : ''}
+        </div>
+        <div class="col-card ${col.equipped === 'atk_trophy' ? 'equipped' : ''}" style="border-color: ${col.atk_trophy ? '#f05' : '#444'}; opacity: ${col.atk_trophy ? 1 : 0.5};">
+            <div style="font-size:30px;">🔴</div>
+            <h4 style="color:#f05;">攻撃力UP トロフィー</h4>
+            <p>BOSS戦で攻撃力+20</p>
+            <div class="count">所持: ${col.atk_trophy || 0}</div>
+            ${col.atk_trophy ? `<button onclick="equipTrophy('atk_trophy')" style="padding:5px; font-size:12px; margin-top:5px; background:#444; border:none; cursor:pointer; color:white; border-radius:4px;">装備</button>` : ''}
+        </div>
+        <div class="col-card ${col.equipped === 'luck_trophy' ? 'equipped' : ''}" style="border-color: ${col.luck_trophy ? '#b0f' : '#444'}; opacity: ${col.luck_trophy ? 1 : 0.5};">
+            <div style="font-size:30px;">🔮</div>
+            <h4 style="color:#b0f;">運UP トロフィー</h4>
+            <p>宝箱レア率UP(自動)</p>
+            <div class="count">所持: ${col.luck_trophy || 0}</div>
+            ${col.luck_trophy ? `<button onclick="equipTrophy('luck_trophy')" style="padding:5px; font-size:12px; margin-top:5px; background:#444; border:none; cursor:pointer; color:white; border-radius:4px;">装備</button>` : ''}
+        </div>
+    `;
+    
+    let equipText = "なし";
+    if(col.equipped === 'hp_trophy') equipText = "🟢 体力+50 トロフィー";
+    if(col.equipped === 'atk_trophy') equipText = "🔴 攻撃力UP トロフィー";
+    if(col.equipped === 'luck_trophy') equipText = "🔮 運UP トロフィー";
+    if(col.equipped === 'normal_trophy') equipText = "🏆 普通のトロフィー";
+    document.getElementById('current-equip-text').innerText = equipText;
+}
+
+function equipTrophy(id) {
+    let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"hp_trophy":0, "normal_trophy":0, "atk_trophy":0, "luck_trophy":0, "equipped":""}');
+    col.equipped = id;
+    localStorage.setItem('neon_arena_collection', JSON.stringify(col));
+    updateCollectionUI();
+}
+
+// ★ボス難易度選択処理
+function rollBossDifficulty() {
+    let r = Math.random() * 100;
+    if (r < 50) bossDifficultySetting = 'hard';
+    else if (r < 85) bossDifficultySetting = 'normal';
+    else bossDifficultySetting = 'easy';
+    
+    document.getElementById('boss-diff-select').value = bossDifficultySetting;
+    updateBossDiffResult();
+}
+function updateBossDiffResult() {
+    let val = document.getElementById('boss-diff-select').value;
+    bossDifficultySetting = val;
+    let txt = "普通";
+    if(val === 'hard') txt = "強い (HP2倍 / 攻撃力高)";
+    if(val === 'easy') txt = "弱い (HP半減 / 攻撃力低)";
+    document.getElementById('boss-diff-result').innerText = `現在の選択: ${txt}`;
+}
+document.getElementById('boss-diff-select')?.addEventListener('change', updateBossDiffResult);
+
+// ================= 初期モード選択ロジック & Bot生成 =================
+document.getElementById('btn-single-player').addEventListener('click', () => {
+    myName = document.getElementById('global-player-name').value.trim() || "Player";
+    isSinglePlayerMode = true;
+    isHost = true;
+    myId = "host";
+    roomNumber = "Solo";
+    
+    gameState.maxTime = 0; 
+    gameState.timeLeft = 0;
+    
+    currentMapWidth = 2500;
+    currentMapHeight = 2500;
+    
+    let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"equipped":""}');
+    addPlayerToState(myId, myName, col.equipped);
+    recordPlayerHistory(myId, myName); 
+    
+    let botCount = parseInt(document.getElementById('bot-count-input').value) || 5;
+    let botStrength = document.getElementById('bot-strength-input').value;
+    
+    for(let i=1; i<=botCount; i++) {
+        spawnBot(i, botStrength);
+    }
+    
+    startGame();
+    
+    gameState.status = 'playing';
+    document.getElementById('waiting-room').style.display = 'none';
+    document.getElementById('solo-setup-panel').style.display = 'none';
+    document.getElementById('game-ui').style.display = 'block';
+});
+
+function spawnBot(index, strength="normal") {
+    let botId = 'bot_' + index;
+    gameState.players[botId] = {
+        id: botId, name: "Bot " + index, x: Math.random() * currentMapWidth, y: Math.random() * currentMapHeight,
+        hp: 100, maxHp: 100, points: 0, color: '#ff6600',
+        input: {w:false, a:false, s:false, d:false}, mouse: {x:0, y:0}, isAdmin: false,
+        infiniteAmmo: false, disarmed: false, isBot: true, isBoss: false, lastShoot: 0,
+        strafeDir: 1, botDifficulty: strength
+    };
+}
+
+function joinBossMatch() {
+    if (peer && peer.id !== "host") {
+        peer.destroy();
+        peer = null;
+    }
+
+    myName = document.getElementById('global-player-name').value.trim() || "Player";
+    isSinglePlayerMode = true;
+    isHost = true;
+    myId = "host";
+    roomNumber = "BOSS";
+    
+    currentMapWidth = 1200;
+    currentMapHeight = 1200;
+    
+    gameState.maxTime = 0; 
+    gameState.timeLeft = 0;
+    gameState.players = {};
+    gameState.bullets = [];
+    
+    // UIからの難易度設定の同期をホスト自身の変数に明示的に登録
+    gameState.bossDifficulty = bossDifficultySetting; 
+
+    let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"equipped":""}');
+    addPlayerToState(myId, myName, col.equipped);
+    recordPlayerHistory(myId, myName);
+    
+    // ★難易度反映
+    let botId = 'bot_OMEGA';
+    let bossMaxHp = 15000;
+    let bossDiff = "crazy";
+    if (gameState.bossDifficulty === 'easy') { bossMaxHp = 7500; bossDiff = "easy"; }
+    if (gameState.bossDifficulty === 'hard') { bossMaxHp = 30000; bossDiff = "crazy"; }
+
+    gameState.players[botId] = {
+        id: botId, name: "★ OMEGA BOSS ★", x: currentMapWidth / 2, y: currentMapHeight / 2,
+        hp: bossMaxHp, maxHp: bossMaxHp, points: 0, color: '#ff0000',
+        input: {w:false, a:false, s:false, d:false}, mouse: {x:0, y:0}, isAdmin: false,
+        infiniteAmmo: true, disarmed: false, isBot: true, isBoss: true, lastShoot: 0,
+        strafeDir: 1, botDifficulty: bossDiff
+    };
+    
+    startGame();
+    
+    gameState.status = 'playing';
+    document.getElementById('waiting-room').style.display = 'none';
+    document.getElementById('game-ui').style.display = 'block';
+    
+    const globalBossContainer = document.getElementById('global-boss-timer-container');
+    if(globalBossContainer) globalBossContainer.style.display = 'none';
+}
+
+// ================= 高速同期UIループ(100ms) =================
+setInterval(() => {
+    const globalAnn = document.getElementById('global-announcement');
+    if (globalAdminMsg) {
+        globalAnn.innerText = `📢 ADMIN: ${globalAdminMsg}`;
+        globalAnn.style.display = 'block';
+    } else if (gameState && gameState.adminMsg) {
+        globalAnn.innerText = `📢 ADMIN: ${gameState.adminMsg}`;
+        globalAnn.style.display = 'block';
+    } else {
+        globalAnn.style.display = 'none';
+    }
+    
+    const customTimerDisp = document.getElementById('admin-custom-timer-display');
+    const currentCustomTimer = globalAdminCustomTimer > 0 ? globalAdminCustomTimer : (gameState && gameState.adminCustomTimer > 0 ? gameState.adminCustomTimer : 0);
+    
+    if (currentCustomTimer > 0) {
+        customTimerDisp.style.display = 'block';
+        customTimerDisp.innerText = `⏳ 管理者タイマー: ${currentCustomTimer}秒`;
+    } else {
+        customTimerDisp.style.display = 'none';
+    }
+
+    const plPanel = document.getElementById('admin-player-list-panel');
+    if (plPanel && plPanel.style.display === 'block') updateAdminPlayerListUI();
+    
+    const hlPanel = document.getElementById('admin-history-list-panel');
+    if (hlPanel && hlPanel.style.display === 'block') updateAdminHistoryListUI();
+
+    const bdPanel = document.getElementById('boss-difficulty-panel');
+    if (bdPanel && roomNumber === 'BOSS') {
+        bdPanel.style.display = 'block';
+    }
+
+}, 100);
+
+// ================= 絶対時間計算のタイマー＆ボスイベント管理ループ(200ms) =================
+setInterval(() => {
+    try {
+        let now = Date.now();
+        let cycle = now % BOSS_CYCLE_MS; 
+        let isNaturalBossTime = cycle < BOSS_WINDOW_MS; 
+        let isAdminBossTime = bossJoinDeadline > now; 
+
+        let isBossActive = isNaturalBossTime || isAdminBossTime;
+
+        if (isBossActive && !wasBossActive) {
+            triggerBossAlarmUI(); 
+        }
+        wasBossActive = isBossActive;
+
+        let remainSec = isAdminBossTime 
+            ? Math.ceil((bossJoinDeadline - now) / 1000)
+            : Math.ceil((BOSS_WINDOW_MS - cycle) / 1000);
+        
+        let remainToNext = BOSS_CYCLE_MS - cycle;
+        let m = Math.floor(remainToNext / 60000);
+        let s = Math.floor((remainToNext % 60000) / 1000);
+        let nextStr = `${String(m).padStart(2,'0')}分${String(s).padStart(2,'0')}秒`;
+
+        let bossPanel = document.getElementById('boss-event-panel');
+        let bossBtn = document.getElementById('btn-join-boss');
+        let bossTimerTxt = document.getElementById('boss-timer-text');
+        let diffPanel = document.getElementById('boss-difficulty-panel');
+
+        if (bossPanel && bossBtn && bossTimerTxt) {
+            if (isBossActive) {
+                bossTimerTxt.innerText = "🚨 巨大ボスが襲来中！急いで参加せよ！ 🚨";
+                bossTimerTxt.style.color = "#0f5";
+                bossBtn.style.display = "block";
+                if(diffPanel) diffPanel.style.display = "block";
+                bossBtn.innerHTML = `⚔️ 巨大ボスに挑む (1vs1)<br><span style="font-size:14px; font-weight:normal;">受付終了まで残り ${remainSec}秒</span>`;
+            } else {
+                bossTimerTxt.innerText = `次のボス襲来まで: ${nextStr}`;
+                bossTimerTxt.style.color = "#aaa";
+                bossBtn.style.display = "none";
+                if(diffPanel) diffPanel.style.display = "none";
+            }
+        }
+
+        let globalBossContainer = document.getElementById('global-boss-timer-container');
+        let globalBossTxt = document.getElementById('global-boss-timer-text');
+        let globalBossBtn = document.getElementById('global-btn-join-boss');
+        
+        if (globalBossTxt && globalBossBtn && globalBossContainer) {
+            if (gameState && gameState.status === 'playing') {
+                globalBossContainer.style.display = showBossTimerOverlay ? 'block' : 'none';
+            } else {
+                globalBossContainer.style.display = 'block';
+            }
+
+            if (isBossActive) {
+                globalBossTxt.innerText = `🚨 襲来中！残り: ${remainSec}秒`;
+                globalBossTxt.style.color = "#0f5";
+                globalBossBtn.style.display = "block";
+                globalBossBtn.innerHTML = `参加する (${remainSec}秒)`;
+            } else {
+                globalBossTxt.innerText = `次まで: ${nextStr}`;
+                globalBossTxt.style.color = "#fff";
+                globalBossBtn.style.display = "none";
+            }
+        }
+    } catch(e) {
+        console.error("Boss Timer Sync Error:", e);
+    }
+}, 200);
+
+// ================= タイマー管理ループ(1秒) =================
+setInterval(() => {
+    if (isAdminUnlocked) {
+        const adminPanel = document.getElementById('admin-panel');
+        if (adminPanel) adminPanel.classList.add('permanent'); 
+    }
+
+    if (globalAdminMsgTimer > 0) {
+        globalAdminMsgTimer--;
+        if (globalAdminMsgTimer <= 0) globalAdminMsg = "";
+    }
+
+    if (globalAdminCustomTimer > 0) {
+        globalAdminCustomTimer--;
+    }
+
+    if (gameState && gameState.maxTime > 0) {
+        const timerDisp = document.getElementById('timer-display');
+        timerDisp.style.display = 'block';
+        if (gameState.isTimeUp) {
+            timerDisp.innerText = "タイムアップ！";
+            timerDisp.style.color = "var(--danger)";
+        } else {
+            timerDisp.innerText = `残り時間: ${gameState.timeLeft}秒`;
+            timerDisp.style.color = "white";
+        }
+    } else {
+        const timerDisp = document.getElementById('timer-display');
+        if(timerDisp) timerDisp.style.display = 'none';
+    }
+
+    if (gameState && gameState.isTimeUp) {
+        const lb = document.getElementById('leaderboard');
+        if (lb) lb.classList.add('show');
+        if (isHost) {
+            const hcp = document.getElementById('host-choice-panel');
+            if(hcp) hcp.style.display = 'block';
+            const cwm = document.getElementById('client-wait-msg');
+            if(cwm) cwm.style.display = 'none';
+        } else {
+            const hcp = document.getElementById('host-choice-panel');
+            if(hcp) hcp.style.display = 'none';
+            const cwm = document.getElementById('client-wait-msg');
+            if(cwm) cwm.style.display = 'block'; 
+        }
+    }
+}, 1000);
+
+// ================= Global Receiver =================
+let globalReceiverPeer = null;
+let globalReceiverConn = null;
+
+function initGlobalReceiver() {
+    globalReceiverPeer = new Peer({ config: globalPeerConfig });
+    globalReceiverPeer.on('open', () => { tryConnectGlobalMaster(); });
+    globalReceiverPeer.on('error', () => { setTimeout(initGlobalReceiver, 5000); });
+}
+
+function tryConnectGlobalMaster() {
+    if (isAdminUnlocked || isHost) return; 
+    if (!globalReceiverPeer || globalReceiverPeer.destroyed) return;
+    if (!globalReceiverConn || !globalReceiverConn.open) {
+        globalReceiverConn = globalReceiverPeer.connect('neon_arena_global_super_admin_master', { reliable: true });
+        globalReceiverConn.on('data', (data) => {
+            if (data.type === 'global_msg') {
+                globalAdminMsg = data.text;
+                globalAdminMsgTimer = 50; 
+                document.getElementById('global-announcement').innerText = `📢 ADMIN: ${globalAdminMsg}`;
+                document.getElementById('global-announcement').style.display = 'block';
+            }
+            if (data.type === 'global_timer') {
+                globalAdminCustomTimer = data.time;
+            }
+            if (data.type === 'global_boss_trigger') { 
+                bossJoinDeadline = Date.now() + BOSS_WINDOW_MS;
+            }
+        });
+    }
+}
+setInterval(tryConnectGlobalMaster, 5000);
+window.addEventListener('load', initGlobalReceiver);
+
+// ================= 隠しコマンド検知 =================
+window.addEventListener('keydown', (e) => {
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+
+    if (/[0-9]/.test(e.key)) {
+        inputBuffer += e.key;
+        if (inputBuffer.length > 6) inputBuffer = inputBuffer.substring(inputBuffer.length - 6);
+        if (inputBuffer === "140923") {
+            isAdminUnlocked = true;
+            saveAdminState(); 
+            document.getElementById('admin-panel').classList.add('permanent'); 
+            document.getElementById('admin-panel').style.display = 'block'; 
+            document.getElementById('btn-admin-close').style.display = 'none'; 
+            
+            if (!globalMasterPeer) {
+                globalMasterPeer = new Peer('neon_arena_global_super_admin_master', { config: globalPeerConfig });
+                globalMasterPeer.on('connection', (conn) => { globalMasterConnections.push(conn); });
+            }
+            alert("管理者パネルが解放されました！[X]キーで開閉、全サーバー送信が可能です。\n※管理者特権(無限弾/フリーズ無効)が適用されます。");
+            updateHUD();
+        }
+    }
+
+    if (e.key.toLowerCase() === 'x') {
+        toggleAdminPanel();
+    }
+});
+
+// ================= Admin Logic & Player Controls =================
+function toggleAdminPanel() {
+    if (!isAdminUnlocked) return; 
+    const panel = document.getElementById('admin-panel');
+    const currentDisplay = window.getComputedStyle(panel).display;
+    if (currentDisplay === 'none') {
+        panel.style.display = 'block';
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function openAdminCheatPanel() {
+    document.getElementById('admin-cheat-panel').style.display = 'block';
+}
+
+function closeAdminCheatPanel() {
+    document.getElementById('admin-cheat-panel').style.display = 'none';
+}
+
+function toggleFreeze() {
+    if(!isAdminUnlocked) return;
+    if(isHost) {
+        gameState.isFrozen = !gameState.isFrozen;
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'toggleFreeze' });
+    }
+}
+
+function toggleNoReload() {
+    if(!isAdminUnlocked) return;
+    adminNoReload = !adminNoReload; 
+    updateHUD();
+}
+
+function sendAdminMessage() {
+    if(!isAdminUnlocked) return;
+    const msg = document.getElementById('admin-msg-input').value.trim();
+    if (!msg) return;
+    
+    const scope = document.querySelector('input[name="msg-scope"]:checked').value;
+
+    if (scope === 'global' && globalMasterPeer) {
+        globalMasterConnections.forEach(c => {
+            if (c.open) c.send({ type: 'global_msg', text: msg });
+        });
+        globalAdminMsg = msg; 
+        globalAdminMsgTimer = 50;
+    } else {
+        if(isHost) {
+            gameState.adminMsg = msg;
+            gameState.adminMsgTimer = 300; 
+        } else if(connection && connection.open) {
+            connection.send({ type: 'admin_command', command: 'roomMsg', text: msg });
+        }
+    }
+    
+    const globalAnn = document.getElementById('global-announcement');
+    globalAnn.innerText = `📢 ADMIN: ${msg}`;
+    globalAnn.style.display = 'block';
+    
+    document.getElementById('admin-msg-input').value = '';
+}
+
+function sendAdminTimer() {
+    if(!isAdminUnlocked) return;
+    const timeVal = parseInt(document.getElementById('admin-timer-input').value);
+    if (isNaN(timeVal) || timeVal <= 0) return;
+    
+    const scope = document.querySelector('input[name="msg-scope"]:checked').value;
+
+    if (scope === 'global' && globalMasterPeer) {
+        globalMasterConnections.forEach(c => {
+            if (c.open) c.send({ type: 'global_timer', time: timeVal });
+        });
+        globalAdminCustomTimer = timeVal;
+    } else {
+        if(isHost) {
+            gameState.adminCustomTimer = timeVal;
+        } else if(connection && connection.open) {
+            connection.send({ type: 'admin_command', command: 'setTimer', time: timeVal });
+        }
+    }
+    document.getElementById('admin-timer-input').value = '';
+}
+
+function triggerAdminBoss() {
+    if(!isAdminUnlocked) return;
+    
+    const scope = document.querySelector('input[name="msg-scope"]:checked').value;
+
+    if (scope === 'global' && globalMasterPeer) {
+        globalMasterConnections.forEach(c => {
+            if (c.open) c.send({ type: 'global_boss_trigger' });
+        });
+        bossJoinDeadline = Date.now() + BOSS_WINDOW_MS;
+        globalAdminMsg = "★ 全サーバーでボスマッチの参加受付が開始されました！(25秒) ★";
+        globalAdminMsgTimer = 10;
+    } else {
+        bossJoinDeadline = Date.now() + BOSS_WINDOW_MS;
+        if(isHost) {
+            gameState.adminMsg = "★ 部屋内でボスマッチの受付が開始されました！(25秒) ★";
+            gameState.adminMsgTimer = 10;
+        } else if(connection && connection.open) {
+            connection.send({ type: 'admin_command', command: 'roomMsg', text: "★ ボスマッチの受付が開始されました！(25秒) ★" });
+            connection.send({ type: 'admin_command', command: 'triggerBoss' });
+        }
+    }
+    
+    const globalAnn = document.getElementById('global-announcement');
+    globalAnn.innerText = `📢 ADMIN: ★ ボスマッチの受付が開始されました！(25秒) ★`;
+    globalAnn.style.display = 'block';
+}
+
+function adminSetHP() {
+    if(!isAdminUnlocked && !isHost) return;
+    const val = parseInt(document.getElementById('admin-hp-input').value);
+    if(isNaN(val)) return;
+    
+    if(isHost) {
+        if(gameState.players[myId]) gameState.players[myId].hp = val;
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'setHP', targetId: myId, hp: val });
+    }
+    document.getElementById('admin-hp-input').value = '';
+}
+
+function toggleAdminPlayerList() {
+    if(!isAdminUnlocked && !isHost) return;
+    const pnl = document.getElementById('admin-player-list-panel');
+    if(pnl.style.display === 'block' || window.getComputedStyle(pnl).display === 'block') {
+        pnl.style.display = 'none';
+    } else {
+        pnl.style.display = 'block';
+        document.getElementById('admin-history-list-panel').style.display = 'none'; 
+        updateAdminPlayerListUI(true);
+    }
+}
+
+function toggleAdminHistoryList() {
+    if(!isAdminUnlocked && !isHost) return;
+    const pnl = document.getElementById('admin-history-list-panel');
+    if(pnl.style.display === 'block' || window.getComputedStyle(pnl).display === 'block') {
+        pnl.style.display = 'none';
+    } else {
+        pnl.style.display = 'block';
+        document.getElementById('admin-player-list-panel').style.display = 'none'; 
+        updateAdminHistoryListUI(true);
+    }
+}
+
+function updateAdminPlayerListUI(force = false) {
+    const container = document.getElementById('admin-player-list');
+    if(!container || !gameState.players) return;
+    
+    if(!force && document.activeElement && document.activeElement.tagName === 'INPUT' && document.activeElement.closest('#admin-player-list')) {
+        return; 
+    }
+
+    let html = '';
+    for(let id in gameState.players) {
+        let p = gameState.players[id];
+        let item = document.getElementById('admin-item-' + id);
+        
+        if (!item) {
+            let div = document.createElement('div');
+            div.id = 'admin-item-' + id;
+            div.className = 'admin-player-item';
+            div.innerHTML = `
+                <div style="margin-bottom: 4px;">
+                    <span style="color:${p.color}; font-weight:bold; font-size:14px;">${p.name}</span>
+                    <span style="color:#aaa; font-size:10px;">(${id === 'host' ? 'Host' : (p.isBot ? 'Bot' : 'Client')})</span>
+                </div>
+                <div style="display:flex; align-items:center; gap: 5px; margin-bottom: 4px;">
+                    <span style="font-size:12px;">HP:</span>
+                    <input type="number" id="hp-input-${id}" value="${Math.max(0, p.hp)}" onchange="adminTargetHP('${id}', this.value)">
+                    <button onclick="adminKillPlayer('${id}')">即KILL</button>
+                </div>
+                <div>
+                    <label><input type="checkbox" id="ammo-cb-${id}" ${p.infiniteAmmo ? 'checked' : ''} onchange="adminToggleAmmo('${id}')"> 弾薬無限</label>
+                    <label><input type="checkbox" id="disarm-cb-${id}" ${p.disarmed ? 'checked' : ''} onchange="adminToggleDisarmed('${id}')"> 武器使用禁止</label>
+                </div>
+            `;
+            container.appendChild(div);
+        } else {
+            let hpInput = document.getElementById('hp-input-' + id);
+            let ammoCb = document.getElementById('ammo-cb-' + id);
+            let disarmCb = document.getElementById('disarm-cb-' + id);
+            
+            if (document.activeElement !== hpInput) hpInput.value = Math.max(0, p.hp);
+            if (document.activeElement !== ammoCb) ammoCb.checked = p.infiniteAmmo;
+            if (document.activeElement !== disarmCb) disarmCb.checked = p.disarmed;
+        }
+    }
+    
+    Array.from(container.children).forEach(child => {
+        let id = child.id.replace('admin-item-', '');
+        if (!gameState.players[id]) {
+            child.remove();
+        }
+    });
+}
+
+function updateAdminHistoryListUI(force = false) {
+    const container = document.getElementById('admin-history-list');
+    if(!container) return;
+
+    let history = {};
+    try {
+        history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}');
+    } catch(e) {}
+
+    container.innerHTML = '';
+    
+    const sortedIds = Object.keys(history).sort((a, b) => history[b].lastSeen - history[a].lastSeen);
+
+    if (sortedIds.length === 0) {
+        container.innerHTML = '<div style="color:#aaa; font-size:12px;">履歴がありません</div>';
+        return;
+    }
+
+    sortedIds.forEach(id => {
+        const data = history[id];
+        const isActive = gameState.players && gameState.players[id];
+        
+        let dateObj = new Date(data.lastSeen);
+        let dateStr = `${dateObj.getMonth()+1}/${dateObj.getDate()} ${dateObj.getHours()}:${String(dateObj.getMinutes()).padStart(2,'0')}`;
+
+        let div = document.createElement('div');
+        div.className = 'admin-player-item';
+        div.style.borderColor = data.isBanned ? '#f05' : 'rgba(255,255,255,0.1)';
+        
+        div.innerHTML = `
+            <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                <span style="color:#fff; font-weight:bold; font-size:14px; text-decoration: ${data.isBanned ? 'line-through' : 'none'};">${data.name}</span>
+                <span style="font-size:10px; color:${isActive ? '#0f5' : '#888'};">${isActive ? '🟢 プレイ中' : 'オフライン'}</span>
+            </div>
+            <div style="font-size:10px; color:#aaa; margin-bottom: 4px;">ID: ${id.substring(0, 15)}... | 最終: ${dateStr}</div>
+            <div style="display:flex; gap: 5px;">
+                <button onclick="adminToggleBan('${id}')" style="background:${data.isBanned ? '#555' : 'var(--danger)'}; width:100%;">
+                    ${data.isBanned ? 'BAN解除' : '🚫 BANする'}
+                </button>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+window.adminToggleBan = function(targetId) {
+    if(!isAdminUnlocked && !isHost) return;
+    
+    try {
+        let history = JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}');
+        if (history[targetId]) {
+            history[targetId].isBanned = !history[targetId].isBanned;
+            localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+            
+            if (history[targetId].isBanned && isHost && connections) {
+                const targetConn = Object.values(connections).find(c => c.peer === targetId);
+                if (targetConn) {
+                    targetConn.send({ type: 'banned_kick' });
+                    setTimeout(() => { targetConn.close(); }, 500);
+                }
+            }
+            
+            updateAdminHistoryListUI(); 
+        }
+    } catch(e) {}
+};
+
+window.adminTargetHP = function(targetId, valStr) {
+    if(!isAdminUnlocked && !isHost) return;
+    const val = parseInt(valStr);
+    if(isNaN(val)) return;
+
+    if(isHost) {
+        let p = gameState.players[targetId];
+        if(p) {
+            p.hp = val;
+            if(p.hp <= 0 && !p.isBoss) adminKillPlayer(targetId);
+        }
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'setTargetHP', targetId: targetId, hp: val });
+    }
+};
+
+window.adminToggleAmmo = function(targetId) {
+    if(!isAdminUnlocked && !isHost) return;
+    if(isHost) {
+        if(gameState.players[targetId]) {
+            gameState.players[targetId].infiniteAmmo = !gameState.players[targetId].infiniteAmmo;
+        }
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'toggleAmmo', targetId: targetId });
+    }
+};
+
+window.adminToggleDisarmed = function(targetId) {
+    if(!isAdminUnlocked && !isHost) return;
+    if(isHost) {
+        if(gameState.players[targetId]) {
+            gameState.players[targetId].disarmed = !gameState.players[targetId].disarmed;
+        }
+    } else if(connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'toggleDisarmed', targetId: targetId });
+    }
+};
+
+window.adminKillPlayer = function(targetId) {
+    if(!isAdminUnlocked && !isHost) return;
+    
+    if(isHost) {
+        let p = gameState.players[targetId];
+        if(p && p.hp > 0) {
+            p.hp = 0; 
+            spawnParticles(p.x, p.y, p.color, 30);
+            gameState.killLogs.push({ text: `[ADMIN] ⚡ ${p.name}`, timer: 180 });
+            if(gameState.killLogs.length > 5) gameState.killLogs.shift();
+            
+            if(!p.isBoss) {
+                setTimeout(() => {
+                    if(gameState.players[targetId]) {
+                        gameState.players[targetId].hp = gameState.players[targetId].maxHp || 100;
+                        gameState.players[targetId].x = Math.random() * currentMapWidth;
+                        gameState.players[targetId].y = Math.random() * currentMapHeight;
+                    }
+                }, 2000);
+            } else {
+                gameState.adminMsg = "★ 管理者によりボスが排除されました ★";
+                gameState.adminMsgTimer = 300;
+            }
+        }
+    } else if (connection && connection.open) {
+        connection.send({ type: 'admin_command', command: 'killPlayer', targetId: targetId });
+    }
+};
+
+function hostDisbandRoom(force = false) {
+    if (!isHost) return;
+    if (!force && !confirm("本当に部屋を解散しますか？全プレイヤーも自動的に退出されます。")) return;
+    
+    gameState.isDisbanded = true;
+    setTimeout(() => { location.reload(); }, 150);
+}
+
+function hostChooseContinue() {
+    if (!isHost) return;
+    const durationInput = document.getElementById('game-duration-input').value;
+    gameState.maxTime = durationInput ? parseInt(durationInput) : 0;
+    gameState.timeLeft = gameState.maxTime;
+    gameState.isTimeUp = false;
+    gameState.status = 'playing';
+    
+    for(let id in gameState.players) {
+        if(gameState.players[id].isBoss && gameState.players[id].hp <= 0) continue; 
+        gameState.players[id].hp = gameState.players[id].maxHp || 100;
+        gameState.players[id].x = Math.random() * currentMapWidth;
+        gameState.players[id].y = Math.random() * currentMapHeight;
+    }
+    document.getElementById('host-choice-panel').style.display = 'none';
+}
+
+function hostChooseEnd() {
+    if (!isHost) return;
+    hostDisbandRoom();
+}
+
+function startActualGame() {
+    if(!isHost) return;
+    if(Object.keys(gameState.players).length >= 2) {
+        gameState.status = 'playing'; 
+    }
+}
+
+// ================= Networking (PeerJS) =================
+
+document.getElementById('btn-host').addEventListener('click', () => {
+    myName = document.getElementById('global-player-name').value.trim() || "Player";
+    roomNumber = Math.floor(1000 + Math.random() * 9000).toString(); 
+    currentMapWidth = 2500;
+    currentMapHeight = 2500;
+    
+    statusText.innerText = "部屋を作成中...";
+    if (peer) peer.destroy();
+    
+    peer = new Peer(PREFIX + roomNumber, { config: globalPeerConfig });
+    
+    peer.on('open', (id) => {
+        isHost = true;
+        myId = "host";
+        startGame();
+        
+        const durationInput = document.getElementById('game-duration-input').value;
+        gameState.maxTime = durationInput ? parseInt(durationInput) : 0;
+        gameState.timeLeft = gameState.maxTime;
+        gameState.adminMsgTimer = 0;
+        gameState.adminCustomTimer = 0; 
+        
+        let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"equipped":""}');
+        addPlayerToState(myId, myName, col.equipped);
+        recordPlayerHistory(myId, myName); 
+        
+        peer.on('connection', (conn) => {
+            connections[conn.peer] = conn;
+            conn.on('data', (data) => {
+                if(data.type === 'init') {
+                    if (checkIsBanned(conn.peer)) {
+                        conn.send({ type: 'banned_kick' });
+                        setTimeout(() => { conn.close(); }, 500);
+                        return;
+                    }
+
+                    addPlayerToState(conn.peer, data.name, data.equipped);
+                    recordPlayerHistory(conn.peer, data.name); 
+                } 
+                else if(data.t === 'in') {
+                    if(gameState.players[conn.peer]) {
+                        let p = gameState.players[conn.peer];
+                        p.input = {
+                            w: !!(data.k & 8),
+                            a: !!(data.k & 4),
+                            s: !!(data.k & 2),
+                            d: !!(data.k & 1)
+                        };
+                        p.mouse = { x: data.mx, y: data.my };
+                        p.isAdmin = !!data.ad;
+                        
+                        if (data.px !== undefined && data.py !== undefined) {
+                            let dist = Math.hypot(data.px - p.x, data.py - p.y);
+                            if (dist < 200) { 
+                                p.x = data.px;
+                                p.y = data.py;
+                            }
+                        }
+                    }
+                } else if(data.t === 'sh') {
+                    handleShoot(conn.peer, {x: data.mx, y: data.my}, {x: data.cx, y: data.cy, a: data.a});
+                } else if(data.type === 'admin_command') {
+                    if(data.command === 'toggleFreeze') gameState.isFrozen = !gameState.isFrozen;
+                    if(data.command === 'roomMsg') {
+                        gameState.adminMsg = data.text;
+                        gameState.adminMsgTimer = 300;
+                    }
+                    if(data.command === 'setTimer') { 
+                        gameState.adminCustomTimer = data.time;
+                    }
+                    if(data.command === 'triggerBoss') { 
+                        bossJoinDeadline = Date.now() + BOSS_WINDOW_MS;
+                    }
+                    if(data.command === 'setHP' && gameState.players[data.targetId]) {
+                        gameState.players[data.targetId].hp = data.hp;
+                    }
+                    if(data.command === 'setTargetHP' && gameState.players[data.targetId]) {
+                        let p = gameState.players[data.targetId];
+                        if(data.hp <= 0 && p.hp > 0) {
+                            adminKillPlayer(data.targetId);
+                        } else {
+                            p.hp = data.hp;
+                        }
+                    }
+                    if(data.command === 'toggleAmmo' && gameState.players[data.targetId]) {
+                        gameState.players[data.targetId].infiniteAmmo = !gameState.players[data.targetId].infiniteAmmo;
+                    }
+                    if(data.command === 'toggleDisarmed' && gameState.players[data.targetId]) {
+                        gameState.players[data.targetId].disarmed = !gameState.players[data.targetId].disarmed;
+                    }
+                    if(data.command === 'killPlayer' && gameState.players[data.targetId]) {
+                        adminKillPlayer(data.targetId);
+                    }
+                }
+            });
+            conn.on('close', () => { 
+                delete gameState.players[conn.peer]; 
+                delete connections[conn.peer]; 
+            });
+        });
+    });
+    peer.on('error', (err) => { statusText.innerText = "エラー: " + err.type; });
+});
+
+document.getElementById('btn-join').addEventListener('click', () => {
+    myName = document.getElementById('global-player-name').value.trim() || "Player";
+    roomNumber = document.getElementById('room-id-input').value.trim();
+    if(!roomNumber) return; 
+
+    statusText.innerText = "サーバーに接続中...";
+    if (peer) { peer.destroy(); }
+    
+    peer = new Peer({ config: globalPeerConfig });
+
+    peer.on('open', (id) => {
+        myId = id;
+        isHost = false;
+        statusText.innerText = `部屋(${roomNumber})を検索中...`;
+        
+        setTimeout(() => {
+            connection = peer.connect(PREFIX + roomNumber, { reliable: true });
+            const timeoutId = setTimeout(() => {
+                if (!connection || !connection.open) statusText.innerText = "エラー: ホストが見つかりません。";
+            }, 5000);
+
+            connection.on('open', () => {
+                clearTimeout(timeoutId);
+                let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"equipped":""}');
+                connection.send({ type: 'init', name: myName, equipped: col.equipped });
+                startGame();
+            });
+            
+            connection.on('data', (data) => {
+                if (data.type === 'banned_kick') {
+                    alert("あなたはこの部屋からBANされています。");
+                    location.reload();
+                    return;
+                }
+                if (data.type === 'boss_defeated') {
+                    localStorage.setItem('pending_boss_chest', 'true');
+                    hostDisbandRoom(true); 
+                }
+
+                if(data.t === 's') {
+                    currentMapWidth = data.s.mw || 2500;
+                    currentMapHeight = data.s.mh || 2500;
+                    
+                    if (data.s.bdiff) {
+                        gameState.bossDifficulty = data.s.bdiff;
+                        bossDifficultySetting = data.s.bdiff;
+                    }
+
+                    let reconstructed = {
+                        status: data.s.st, isFrozen: !!data.s.f, adminMsg: data.s.a,
+                        adminCustomTimer: data.s.act, 
+                        timeLeft: data.s.tm, maxTime: data.s.mt, isTimeUp: !!data.s.up, isDisbanded: !!data.s.db,
+                        killLogs: data.s.kl || [],
+                        players: {},
+                        bullets: data.s.b.map(b => ({x: b[0], y: b[1], vx: b[2], vy: b[3], owner: b[4], color: b[5]})),
+                        particles: data.s.pt.map(p => ({x: p[0], y: p[1], life: p[2]/100, color: p[3], vx: p[4], vy: p[5]}))
+                    };
+                    
+                    for(let id in data.s.p) {
+                        let cp = data.s.p[id];
+                        let oldP = gameState.players && gameState.players[id];
+                        
+                        reconstructed.players[id] = {
+                            id: id, name: cp[0],
+                            targetX: cp[1], targetY: cp[2],
+                            x: oldP ? oldP.x : cp[1],
+                            y: oldP ? oldP.y : cp[2],
+                            hp: cp[3], points: cp[4], color: cp[5], mouse: {x: cp[6], y: cp[7]},
+                            isAdmin: oldP ? oldP.isAdmin : false,
+                            input: oldP ? oldP.input : {w:false,a:false,s:false,d:false},
+                            infiniteAmmo: !!cp[8],
+                            disarmed: !!cp[9],
+                            isBot: !!cp[10],
+                            isBoss: !!cp[11],
+                            maxHp: cp[12] || 100,
+                            equipped: cp[13] || ""
+                        };
+                    }
+                    reconstructed.bossDifficulty = gameState.bossDifficulty;
+                    gameState = reconstructed;
+                }
+            });
+            
+            connection.on('close', () => { location.reload(); });
+        }, 500); 
+    });
+});
+
+// ================= Game Logic =================
+
+function startGame() {
+    lobby.style.opacity = '0';
+    setTimeout(() => lobby.style.display = 'none', 500);
+    document.getElementById('waiting-room').style.display = 'flex';
+    document.getElementById('wait-room-id').innerText = roomNumber;
+    document.getElementById('room-number').innerText = roomNumber;
+    
+    if (isHost) {
+        document.getElementById('btn-leave-normal').style.display = 'none';
+        document.getElementById('btn-leave-host').style.display = 'block';
+    } else {
+        document.getElementById('btn-leave-normal').style.display = 'block';
+        document.getElementById('btn-leave-host').style.display = 'none';
+    }
+
+    if(isMobile) {
+        document.getElementById('mobile-controls').style.display = 'block';
+        const setupJoystick = (zoneId, baseId, knobId, isLeft) => {
+            const zone = document.getElementById(zoneId);
+            const base = document.getElementById(baseId);
+            const knob = document.getElementById(knobId);
+            let activeTouch = null;
+            let startX, startY;
+
+            zone.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if(activeTouch !== null) return;
+                const touch = e.changedTouches[0];
+                activeTouch = touch.identifier;
+                startX = touch.clientX; startY = touch.clientY;
+                
+                base.style.display = 'block';
+                base.style.left = startX + 'px';
+                base.style.top = startY + 'px';
+                knob.style.transform = `translate(-50%, -50%)`;
+                
+                if(!isLeft) mouse.down = true;
+            }, {passive: false});
+
+            zone.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if(activeTouch === null) return;
+                let touch = null;
+                for(let i=0; i<e.changedTouches.length; i++){
+                    if(e.changedTouches[i].identifier === activeTouch) touch = e.changedTouches[i];
+                }
+                if(!touch) return;
+
+                let dx = touch.clientX - startX;
+                let dy = touch.clientY - startY;
+                let dist = Math.hypot(dx, dy);
+                let maxDist = 60; 
+                
+                if(dist > maxDist) { dx = (dx / dist) * maxDist; dy = (dy / dist) * maxDist; }
+                knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+                if(isLeft) {
+                    keys.w = dy < -20; keys.s = dy > 20; keys.a = dx < -20; keys.d = dx > 20;
+                } else {
+                    screenMouse.x = canvas.width/2 + dx * 10; 
+                    screenMouse.y = canvas.height/2 + dy * 10; 
+                    mouse.down = true;
+                }
+            }, {passive: false});
+
+            const endTouch = (e) => {
+                e.preventDefault();
+                let touchFound = false;
+                for(let i=0; i<e.changedTouches.length; i++){
+                    if(e.changedTouches[i].identifier === activeTouch) touchFound = true;
+                }
+                if(!touchFound) return;
+                
+                activeTouch = null; base.style.display = 'none';
+                if(isLeft) { keys.w = false; keys.s = false; keys.a = false; keys.d = false; } 
+                else { mouse.down = false; }
+            };
+            zone.addEventListener('touchend', endTouch);
+            zone.addEventListener('touchcancel', endTouch);
+        };
+        setupJoystick('left-zone', 'joy-base-left', 'joy-knob-left', true);
+        setupJoystick('right-zone', 'joy-base-right', 'joy-knob-right', false);
+    } else {
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+            const k = e.key.toLowerCase();
+            if(['w','a','s','d'].includes(k)) keys[k] = true;
+            if(k === 'b') toggleLeaderboard();
+            if(k === 'r') reloadWeapon();
+            if(k === 'm') showFullMap = !showFullMap; 
+            if(k === 'o') showBossTimerOverlay = !showBossTimerOverlay; 
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+            const k = e.key.toLowerCase();
+            if(['w','a','s','d'].includes(k)) keys[k] = false;
+        });
+
+        if (isKeyboardAndTouch) {
+            const touchHandler = (e) => {
+                const touch = e.touches[0];
+                if(touch) { screenMouse.x = touch.clientX; screenMouse.y = touch.clientY; }
+            };
+            window.addEventListener('touchstart', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL') return;
+                mouse.down = true; touchHandler(e);
+            }, {passive: false});
+            window.addEventListener('touchmove', touchHandler, {passive: false});
+            
+            window.addEventListener('touchend', (e) => {
+                if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') mouse.down = false;
+            });
+        } else {
+            window.addEventListener('mousemove', (e) => { screenMouse.x = e.clientX; screenMouse.y = e.clientY; });
+            window.addEventListener('mousedown', (e) => { 
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL') return;
+                if(e.button === 0) mouse.down = true; 
+            });
+            window.addEventListener('mouseup', (e) => { if(e.button === 0) mouse.down = false; });
+        }
+    }
+
+    window.addEventListener('blur', () => {
+        for(let k in keys) keys[k] = false;
+        mouse.down = false;
+    });
+
+    requestAnimationFrame((time) => {
+        lastFrameTime = time;
+        gameLoop(time);
+    });
+
+    if(isHost) {
+        if(hostIntervalId) clearInterval(hostIntervalId);
+        hostIntervalId = setInterval(hostUpdate, 1000 / gameFps);
+    }
+}
+
+let gpButtonStates = {}; 
+
+function processGamepadInput() {
+    if (!isGamepadMode) return;
+    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const gp = gamepads[0];
+    if (gp && gp.axes && gp.buttons) {
+        keys.a = gp.axes[0] < -0.2;
+        keys.d = gp.axes[0] > 0.2;
+        keys.w = gp.axes[1] < -0.2;
+        keys.s = gp.axes[1] > 0.2;
+
+        if (Math.abs(gp.axes[2]) > 0.2 || Math.abs(gp.axes[3]) > 0.2) {
+            screenMouse.x = canvas.width / 2 + gp.axes[2] * 200;
+            screenMouse.y = canvas.height / 2 + gp.axes[3] * 200;
+        }
+
+        mouse.down = (gp.buttons[7] && gp.buttons[7].pressed) || (gp.buttons[5] && gp.buttons[5].pressed);
+
+        if ((gp.buttons[2] && gp.buttons[2].pressed) || (gp.buttons[0] && gp.buttons[0].pressed)) {
+            reloadWeapon();
+        }
+
+        if (gp.buttons[4] && gp.buttons[4].pressed) {
+            if (!gpButtonStates[4]) { showFullMap = !showFullMap; gpButtonStates[4] = true; }
+        } else { gpButtonStates[4] = false; }
+
+        if (gp.buttons[6] && gp.buttons[6].pressed) {
+            if (!gpButtonStates[6]) { showBossTimerOverlay = !showBossTimerOverlay; gpButtonStates[6] = true; }
+        } else { gpButtonStates[6] = false; }
+
+        if (gp.buttons[9] && gp.buttons[9].pressed) {
+            if (!gpButtonStates[9]) { toggleLeaderboard(); gpButtonStates[9] = true; }
+        } else { gpButtonStates[9] = false; }
+
+        if (gp.buttons[8] && gp.buttons[8].pressed) {
+            if (!gpButtonStates[8]) { openAdminCheatPanel(); gpButtonStates[8] = true; }
+        } else { gpButtonStates[8] = false; }
+    }
+}
+
+function addPlayerToState(id, name, equippedTrophy = "") {
+    let maxHp = 100;
+    if (roomNumber === "BOSS" && equippedTrophy === "hp_trophy") {
+        maxHp = 150; 
+    }
+    
+    gameState.players[id] = {
+        id: id, name: name, x: Math.random() * currentMapWidth, y: Math.random() * currentMapHeight,
+        hp: maxHp, maxHp: maxHp, points: 0, color: `hsl(${Math.random()*360}, 100%, 60%)`,
+        input: {w:false, a:false, s:false, d:false}, mouse: {x:0, y:0}, isAdmin: false,
+        infiniteAmmo: false, disarmed: false, equipped: equippedTrophy 
+    };
+}
+
+function reloadWeapon() {
+    const me = gameState.players[myId];
+    if (me && ((isAdminUnlocked && adminNoReload) || me.infiniteAmmo)) return;
+    
+    if(isReloading || ammo === MAX_AMMO) return;
+    isReloading = true;
+    document.getElementById('center-msg').style.opacity = '1';
+    setTimeout(() => {
+        ammo = MAX_AMMO;
+        isReloading = false;
+        document.getElementById('center-msg').style.opacity = '0';
+        updateHUD();
+    }, 1500); 
+}
+
+function spawnParticles(x, y, color, count=10) {
+    for(let i=0; i<count; i++) {
+        gameState.particles.push({
+            x: x, y: y, vx: (Math.random() - 0.5) * 10, vy: (Math.random() - 0.5) * 10, life: 1.0, color: color
+        });
+    }
+}
+
+function handleShoot(playerId, mousePos, clientPos) {
+    const p = gameState.players[playerId];
+    if(!p || p.hp <= 0 || p.disarmed) return;
+    
+    let originX = p.x;
+    let originY = p.y;
+    let angle;
+    
+    if (clientPos !== undefined && clientPos.x !== undefined) {
+        originX = clientPos.x;
+        originY = clientPos.y;
+        angle = clientPos.a;
+    } else {
+        angle = Math.atan2(mousePos.y - p.y, mousePos.x - p.x);
+    }
+    
+    gameState.bullets.push({
+        owner: playerId, 
+        x: originX + Math.cos(angle)*20, 
+        y: originY + Math.sin(angle)*20,
+        vx: Math.cos(angle) * 15, 
+        vy: Math.sin(angle) * 15, 
+        life: 100,
+        color: p.color
+    });
+}
+
+function hostUpdate() {
+    frameCount++; 
+    
+    if (!gameState.killLogs) gameState.killLogs = [];
+    for(let i = gameState.killLogs.length - 1; i >= 0; i--) {
+        gameState.killLogs[i].timer -= (60 / gameFps);
+        if (gameState.killLogs[i].timer <= 0) {
+            gameState.killLogs.splice(i, 1);
+        }
+    }
+    
+    if (gameState.adminMsgTimer !== undefined && gameState.adminMsgTimer > 0) {
+        gameState.adminMsgTimer -= (60 / gameFps);
+        if (gameState.adminMsgTimer <= 0) gameState.adminMsg = "";
+    }
+
+    if (gameState.timeLeft > 0 && !gameState.isFrozen && !gameState.isTimeUp && gameState.status === 'playing') {
+        if (frameCount % gameFps === 0) {
+            gameState.timeLeft--;
+            if (gameState.timeLeft <= 0) gameState.isTimeUp = true;
+        }
+    }
+
+    if (gameState.adminCustomTimer !== undefined && gameState.adminCustomTimer > 0 && gameState.status === 'playing') {
+        if (frameCount % gameFps === 0) {
+            gameState.adminCustomTimer--;
+        }
+    }
+    
+    if (roomNumber === "BOSS" && gameState.status === 'playing') {
+        if (frameCount % gameFps === 0) {
+            for(let id in gameState.players) {
+                let p = gameState.players[id];
+                if (!p.isBoss && p.hp > 0 && p.hp < (p.maxHp || 100)) {
+                    p.hp += 1;
+                }
+            }
+        }
+    }
+
+    let hostSpeedFactor = 60 / gameFps;
+
+    if (!gameState.isTimeUp) {
+        if (gameState.status === 'playing') {
+            for (let id in gameState.players) {
+                let p = gameState.players[id];
+                if (p.isBot && p.hp > 0 && !gameState.isFrozen && !p.disarmed) {
+                    let target = null;
+                    let minDist = Infinity;
+                    
+                    for(let tid in gameState.players) {
+                        let tp = gameState.players[tid];
+                        if (tid !== id && tp.hp > 0) { 
+                            let d = Math.hypot(tp.x - p.x, tp.y - p.y);
+                            if(d < minDist) { minDist = d; target = tp; }
+                        }
+                    }
+
+                    if (target) {
+                        let dx = target.x - p.x;
+                        let dy = target.y - p.y;
+                        
+                        p.mouse.x = target.x;
+                        p.mouse.y = target.y;
+
+                        let shootDelay = 1000;
+                        let accuracySpread = 0.2;
+                        let doStrafe = true;
+                        
+                        let effDiff = p.botDifficulty;
+                        if (p.isBoss) effDiff = gameState.bossDifficulty;
+
+                        if (effDiff === 'easy') { shootDelay = 1800; accuracySpread = 0.6; doStrafe = false; }
+                        else if (effDiff === 'normal') { shootDelay = 800; accuracySpread = 0.1; }
+                        else if (effDiff === 'hard' || effDiff === 'crazy') { shootDelay = 300; accuracySpread = 0.05; }
+
+                        let strafeChangeInterval = effDiff === 'crazy' ? Math.floor(gameFps/4) : Math.floor(gameFps/2);
+                        if(frameCount % strafeChangeInterval === 0) p.strafeDir = Math.random() > 0.5 ? 1 : -1;
+                        let pStrafe = doStrafe ? (p.strafeDir || 1) : 0;
+
+                        if (minDist > 400) {
+                            p.input.w = dy < -50; p.input.s = dy > 50; p.input.a = dx < -50; p.input.d = dx > 50;
+                        } else if (minDist < 200) {
+                            p.input.w = dy > 50; p.input.s = dy < -50; p.input.a = dx > 50; p.input.d = dx < -50;
+                        } else {
+                            p.input.w = (dx * pStrafe) > 0; p.input.s = (dx * pStrafe) < 0;
+                            p.input.a = (dy * -pStrafe) > 0; p.input.d = (dy * -pStrafe) < 0;
+                        }
+
+                        if (Date.now() - (p.lastShoot || 0) > shootDelay) {
+                            p.lastShoot = Date.now() + Math.random() * (shootDelay/2);
+                            let angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * accuracySpread;
+                            gameState.bullets.push({
+                                owner: id, x: p.x + Math.cos(angle)*20, y: p.y + Math.sin(angle)*20,
+                                vx: Math.cos(angle) * 15, vy: Math.sin(angle) * 15, life: 100, color: p.color
+                            });
+                        }
+                    } else {
+                        p.input.w = false; p.input.a = false; p.input.s = false; p.input.d = false;
+                    }
+                }
+            }
+        }
+
+        for(let id in gameState.players) {
+            let p = gameState.players[id];
+            if(p.hp <= 0) continue;
+            if(gameState.isFrozen && !p.isAdmin && id !== 'host') continue;
+
+            if(gameState.status === 'playing') {
+                let speed = 5;
+                if (p.isBot) {
+                    if (p.botDifficulty === 'easy') speed = 3;
+                    else if (p.botDifficulty === 'hard') speed = 6;
+                    else if (p.botDifficulty === 'crazy') speed = 8;
+                    
+                    if (p.isBoss) {
+                        if (gameState.bossDifficulty === 'easy') speed = 4;
+                        else if (gameState.bossDifficulty === 'normal') speed = 7;
+                        else if (gameState.bossDifficulty === 'hard' || gameState.bossDifficulty === 'crazy') speed = 10;
+                    }
+                }
+                
+                let actualSpeed = speed * hostSpeedFactor;
+                
+                if(p.input.w) p.y -= actualSpeed; if(p.input.s) p.y += actualSpeed;
+                if(p.input.a) p.x -= actualSpeed; if(p.input.d) p.x += actualSpeed;
+                p.x = Math.max(20, Math.min(currentMapWidth - 20, p.x));
+                p.y = Math.max(20, Math.min(currentMapHeight - 20, p.y));
+            }
+        }
+    }
+
+    if (gameState.status === 'playing') {
+        for(let i = gameState.bullets.length - 1; i >= 0; i--) {
+            let b = gameState.bullets[i];
+            b.x += b.vx * hostSpeedFactor; b.y += b.vy * hostSpeedFactor; 
+            b.life -= 1 * hostSpeedFactor;
+            
+            let hit = false;
+            for(let id in gameState.players) {
+                if(id === b.owner) continue;
+                let p = gameState.players[id];
+                if(p.hp <= 0) continue;
+                
+                let hitbox = p.isBoss ? 60 : 20;
+                let dist = Math.hypot(p.x - b.x, p.y - b.y);
+                if(dist < hitbox) { 
+                    let wasAlive = p.hp > 0;
+                    
+                    let damage = 20;
+                    if (roomNumber === "BOSS") {
+                        let ownerP = gameState.players[b.owner];
+                        if (ownerP && ownerP.equipped === 'atk_trophy') damage += 20;
+                        
+                        if (b.owner === 'bot_OMEGA' && !p.isBoss) {
+                            if (gameState.bossDifficulty === 'easy') damage = 10;
+                            if (gameState.bossDifficulty === 'hard' || gameState.bossDifficulty === 'crazy') damage = 40;
+                        }
+                    }
+                    
+                    p.hp -= damage;
+                    spawnParticles(b.x, b.y, '#fff', 5);
+                    hit = true;
+                    
+                    if(p.hp <= 0 && wasAlive) {
+                        spawnParticles(p.x, p.y, p.color, 30);
+                        
+                        let killerName = gameState.players[b.owner] ? gameState.players[b.owner].name : "Unknown";
+                        gameState.killLogs.push({ text: `${killerName} 🔫 ${p.name}`, timer: 180 });
+                        if(gameState.killLogs.length > 5) gameState.killLogs.shift();
+
+                        if(gameState.players[b.owner]) gameState.players[b.owner].points += (p.isBoss ? 1000 : 10);
+                        
+                        if(!p.isBoss) {
+                            setTimeout(() => {
+                                if(gameState.players[id]) {
+                                    gameState.players[id].hp = gameState.players[id].maxHp || 100;
+                                    gameState.players[id].x = Math.random() * currentMapWidth;
+                                    gameState.players[id].y = Math.random() * currentMapHeight;
+                                }
+                            }, 2000);
+                        } else {
+                            gameState.adminMsg = "★ 見事、巨大ボスが討伐された！ (+1000pt) ★";
+                            gameState.adminMsgTimer = 300;
+                            
+                            for(let cid in connections) {
+                                if(connections[cid].open) connections[cid].send({ type: 'boss_defeated' });
+                            }
+                            localStorage.setItem('pending_boss_chest', 'true');
+                            
+                            setTimeout(() => {
+                                hostDisbandRoom(true);
+                            }, 3000);
+                        }
+                    }
+                    break;
+                }
+            }
+            if(hit || b.life <= 0) gameState.bullets.splice(i, 1);
+        }
+
+        for(let i = gameState.particles.length - 1; i >= 0; i--) {
+            let pt = gameState.particles[i];
+            pt.x += pt.vx * hostSpeedFactor; pt.y += pt.vy * hostSpeedFactor; 
+            pt.life -= 0.05 * hostSpeedFactor;
+            if(pt.life <= 0) gameState.particles.splice(i, 1);
+        }
+    }
+
+    if (!isSinglePlayerMode) {
+        const r = v => Math.round(v * 10) / 10;
+        const cleanPlayers = {};
+        for(let id in gameState.players) {
+            const p = gameState.players[id];
+            cleanPlayers[id] = [
+                p.name, p.x | 0, p.y | 0, p.hp, p.points, p.color, p.mouse.x | 0, p.mouse.y | 0,
+                p.infiniteAmmo ? 1 : 0, p.disarmed ? 1 : 0, p.isBot ? 1 : 0, p.isBoss ? 1 : 0, p.maxHp || 100, p.equipped || ""
+            ];
+        }
+        
+        const cleanBullets = gameState.bullets.map(b => [r(b.x), r(b.y), r(b.vx), r(b.vy), b.owner, b.color]);
+        const cleanParticles = gameState.particles.map(pt => [r(pt.x), r(pt.y), (pt.life * 100) | 0, pt.color, r(pt.vx), r(pt.vy)]);
+
+        const stateMsg = { 
+            t: 's', 
+            s: { 
+                st: gameState.status, p: cleanPlayers, b: cleanBullets, pt: cleanParticles, 
+                f: gameState.isFrozen ? 1 : 0, a: gameState.adminMsg, tm: gameState.timeLeft, 
+                act: gameState.adminCustomTimer, 
+                mt: gameState.maxTime, up: gameState.isTimeUp ? 1 : 0, db: gameState.isDisbanded ? 1 : 0,
+                kl: gameState.killLogs, mw: currentMapWidth, mh: currentMapHeight, bdiff: gameState.bossDifficulty 
+            } 
+        };
+
+        for(let id in connections) {
+            if(connections[id].open) connections[id].send(stateMsg);
+        }
+    }
+}
+
+function gameLoop(currentTime) {
+    processGamepadInput();
+
+    if (!lastFrameTime) lastFrameTime = currentTime;
+    let dt = (currentTime - lastFrameTime) / 1000;
+    lastFrameTime = currentTime;
+    
+    if (dt > 0.1) dt = 0.1;
+    let speedFactor = dt * 60;
+
+    if (gameState && gameState.isDisbanded) { location.reload(); return; }
+
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+        for(let k in keys) keys[k] = false;
+        mouse.down = false;
+    }
+
+    const me = gameState.players[myId];
+    
+    if (me && gameState.status === 'playing') {
+        camera.x += (me.x - canvas.width / 2 - camera.x) * 0.1 * speedFactor;
+        camera.y += (me.y - canvas.height / 2 - camera.y) * 0.1 * speedFactor;
+    } else {
+        camera.x = 0; camera.y = 0;
+    }
+
+    if (showFullMap) {
+        const scaleX = canvas.width / currentMapWidth;
+        const scaleY = canvas.height / currentMapHeight;
+        const scale = Math.min(scaleX, scaleY) * 0.9;
+        const offsetX = (canvas.width - currentMapWidth * scale) / 2;
+        const offsetY = (canvas.height - currentMapHeight * scale) / 2;
+        if(!isMobile && !isGamepadMode) {
+            mouse.x = (screenMouse.x - offsetX) / scale;
+            mouse.y = (screenMouse.y - offsetY) / scale;
+        }
+    } else {
+        if(!isMobile && !isGamepadMode) {
+            mouse.x = screenMouse.x + camera.x;
+            mouse.y = screenMouse.y + camera.y;
+        }
+    }
+
+    const panel = document.getElementById('admin-panel');
+    if(panel.style.display === 'block' && !panel.classList.contains('permanent')) {
+        for(let k in keys) keys[k] = false;
+    }
+
+    clientTickCount++;
+
+    if(isHost) {
+        if(me) { 
+            me.input = {...keys}; 
+            me.mouse = {...mouse}; 
+            me.isAdmin = isAdminUnlocked || isHost;
+        }
+    } else {
+        networkSendTimer += dt;
+        if(connection && connection.open && networkSendTimer >= NETWORK_SEND_INTERVAL) {
+            let sendX = me ? me.x : 0;
+            let sendY = me ? me.y : 0;
+            let kMask = (keys.w ? 8 : 0) | (keys.a ? 4 : 0) | (keys.s ? 2 : 0) | (keys.d ? 1 : 0);
+            connection.send({ t: 'in', k: kMask, mx: mouse.x | 0, my: mouse.y | 0, ad: isAdminUnlocked ? 1 : 0, px: sendX | 0, py: sendY | 0 });
+            networkSendTimer %= NETWORK_SEND_INTERVAL;
+        }
+        
+        for(let id in gameState.players) {
+            let p = gameState.players[id];
+            
+            if (id === myId) {
+                if (p.hp > 0 && gameState.status === 'playing' && !gameState.isTimeUp) {
+                    if (!gameState.isFrozen || isAdminUnlocked || isHost) {
+                        const speed = 5 * speedFactor;
+                        if(keys.w) p.y -= speed;
+                        if(keys.s) p.y += speed;
+                        if(keys.a) p.x -= speed;
+                        if(keys.d) p.x += speed;
+                        p.x = Math.max(20, Math.min(currentMapWidth - 20, p.x));
+                        p.y = Math.max(20, Math.min(currentMapHeight - 20, p.y));
+                    }
+                }
+                
+                if(p.targetX !== undefined && p.targetY !== undefined) {
+                    let dist = Math.hypot(p.targetX - p.x, p.targetY - p.y);
+                    if (dist > 100) {
+                        p.x = p.targetX;
+                        p.y = p.targetY;
+                    }
+                }
+            } else if(p.targetX !== undefined && p.targetY !== undefined) {
+                let dist = Math.hypot(p.targetX - p.x, p.targetY - p.y);
+                if (dist > 100) {
+                    p.x = p.targetX;
+                    p.y = p.targetY;
+                } else {
+                    p.x += (p.targetX - p.x) * 0.3 * speedFactor; 
+                    p.y += (p.targetY - p.y) * 0.3 * speedFactor;
+                }
+            }
+        }
+        
+        for(let b of gameState.bullets) { 
+            b.x += b.vx * speedFactor; 
+            b.y += b.vy * speedFactor; 
+        }
+        for(let pt of gameState.particles) { 
+            pt.x += pt.vx * speedFactor; 
+            pt.y += pt.vy * speedFactor; 
+        }
+    }
+
+    if (me && me.hp > 0 && gameState.status === 'playing' && !gameState.isTimeUp && (!gameState.isFrozen || isAdminUnlocked || isHost) && !me.disarmed) {
+        const canShoot = (isAdminUnlocked && adminNoReload) || me.infiniteAmmo ? true : (ammo > 0);
+        
+        if(mouse.down && !isReloading && canShoot && Date.now() - lastShootTime > 150) {
+            if(!((isAdminUnlocked && adminNoReload) || me.infiniteAmmo)) ammo--;
+            lastShootTime = Date.now();
+            updateHUD();
+            
+            if(isHost) {
+                handleShoot(myId, mouse);
+            } else if(connection && connection.open) {
+                const p = gameState.players[myId];
+                const angle = Math.atan2(mouse.y - p.y, mouse.x - p.x);
+                connection.send({ 
+                    t: 'sh', 
+                    m: { x: mouse.x | 0, y: mouse.y | 0 },
+                    cp: { x: p.x, y: p.y, a: angle }
+                });
+            }
+            
+            if(ammo === 0 && !((isAdminUnlocked && adminNoReload) || me.infiniteAmmo)) {
+                if (isMobile || isKeyboardAndTouch || isGamepadMode) reloadWeapon(); 
+                else reloadWeapon();
+            }
+        }
+    }
+
+    render();
+    updateHUD();
+    requestAnimationFrame(gameLoop);
+}
+
+// ================= Rendering =================
+function render() {
+    ctx.fillStyle = 'rgba(11, 12, 16, 0.4)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    
+    if (showFullMap) {
+        const scaleX = canvas.width / currentMapWidth;
+        const scaleY = canvas.height / currentMapHeight;
+        const scale = Math.min(scaleX, scaleY) * 0.9;
+        const offsetX = (canvas.width - currentMapWidth * scale) / 2;
+        const offsetY = (canvas.height - currentMapHeight * scale) / 2;
+        ctx.translate(offsetX, offsetY);
+        ctx.scale(scale, scale);
+    } else {
+        ctx.translate(-camera.x, -camera.y);
+    }
+
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.05)';
+    ctx.lineWidth = 1;
+    for(let i=0; i<=currentMapWidth; i+=50) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,currentMapHeight); ctx.stroke(); }
+    for(let i=0; i<=currentMapHeight; i+=50) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(currentMapWidth,i); ctx.stroke(); }
+    
+    ctx.strokeStyle = 'rgba(255, 0, 85, 0.5)';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(0, 0, currentMapWidth, currentMapHeight);
+
+    for(let id in gameState.players) {
+        let p = gameState.players[id];
+        if(p.hp <= 0) continue;
+
+        const isMe = id === myId;
+        const targetMouse = isMe ? mouse : p.mouse;
+        const angle = Math.atan2(targetMouse.y - p.y, targetMouse.x - p.x);
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(angle);
+
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = p.color;
+
+        let radius = p.isBoss ? 60 : 20;
+        let gunW = p.isBoss ? 40 : 20;
+        let gunH = p.isBoss ? 20 : 10;
+
+        ctx.fillStyle = '#ccc';
+        ctx.fillRect(radius / 2, -gunH/2, gunW, gunH);
+
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.fillStyle = 'white';
+        ctx.font = showFullMap ? '24px sans-serif' : '14px sans-serif';
+        ctx.textAlign = 'center';
+        
+        let textY = p.isBoss ? -70 : -35;
+        if(showFullMap) textY -= 10;
+        ctx.fillText(p.name, p.x, p.y + textY);
+        
+        if(!isMe) {
+            let hpW = p.isBoss ? 150 : 40;
+            let hpY = p.isBoss ? -60 : -25;
+            let maxHp = p.maxHp || 100;
+            
+            ctx.fillStyle = '#333'; ctx.fillRect(p.x-hpW/2, p.y+hpY, hpW, 5);
+            ctx.fillStyle = p.hp > (maxHp * 0.3) ? (p.isBoss ? '#f00' : '#f05') : (p.isBoss ? '#f00' : '#f05');
+            ctx.fillRect(p.x-hpW/2, p.y+hpY, hpW * (Math.max(0, Math.min(maxHp, p.hp))/maxHp), 5);
+        }
+    }
+
+    ctx.shadowBlur = 10;
+    for(let b of gameState.bullets) {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
+        ctx.fillStyle = b.color || '#0ff';
+        ctx.shadowColor = b.color || '#0ff';
+        ctx.fill();
+    }
+    ctx.shadowBlur = 0; 
+
+    for(let pt of gameState.particles) {
+        ctx.fillStyle = pt.color;
+        ctx.globalAlpha = pt.life;
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 3, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
+    ctx.restore(); 
+}
+
+function updateHUD() {
+    const me = gameState.players[myId];
+    if(!me) return;
+
+    if (gameState.status === 'waiting') {
+        const list = document.getElementById('wait-player-list');
+        if (list) {
+            list.innerHTML = Object.values(gameState.players).map(p => `<li>・ ${p.name}</li>`).join('');
+        }
+        
+        if (isHost) {
+            const btn = document.getElementById('btn-start-game');
+            btn.style.display = 'block';
+            if (Object.keys(gameState.players).length >= 2) {
+                btn.style.background = 'var(--primary)';
+                btn.style.cursor = 'pointer';
+                btn.disabled = false;
+                btn.innerText = 'ゲームを開始する';
+            } else {
+                btn.style.background = '#555';
+                btn.style.cursor = 'not-allowed';
+                btn.disabled = true;
+                btn.innerText = '2人以上で開始可能';
+            }
+        }
+    } 
+    else if (gameState.status === 'playing') {
+        const waitRoom = document.getElementById('waiting-room');
+        if (waitRoom.style.display !== 'none') {
+            waitRoom.style.display = 'none';
+            document.getElementById('game-ui').style.display = 'block';
+        }
+    }
+
+    document.getElementById('hp-bar').style.width = ((Math.max(0, me.hp) / (me.maxHp || 100)) * 100) + '%';
+    document.getElementById('hp-text').innerText = Math.max(0, Math.floor(me.hp)) + ' / ' + (me.maxHp || 100);
+
+    document.getElementById('points-display').innerText = me.points;
+    document.getElementById('ammo-count').innerText = ((isAdminUnlocked && adminNoReload) || me.infiniteAmmo) ? "∞" : ammo;
+
+    const freezeBtn = document.getElementById('btn-freeze');
+    const noReloadBtn = document.getElementById('btn-no-reload');
+    if(freezeBtn) freezeBtn.innerText = `停止機能: ${gameState.isFrozen ? 'ON' : 'OFF'}`;
+    if(noReloadBtn) noReloadBtn.innerText = `No Reload: ${adminNoReload ? 'ON' : 'OFF'}`;
+
+    if(showLeaderboard || (gameState && gameState.isTimeUp)) {
+        const sorted = Object.values(gameState.players).sort((a,b) => b.points - a.points);
+        let html = '';
+        sorted.forEach((p, index) => {
+            let rowStyle = "";
+            let rankStr = index + 1;
+            if (index === 0) {
+                rowStyle = "font-size: 26px; color: #ffd700; font-weight: 900; text-shadow: 0 0 10px #ffd700;";
+                rankStr = "👑 1";
+            }
+            html += `<div class="rank-row ${p.id === myId ? 'me' : ''}" style="${rowStyle}">
+                        <span>${rankStr}. ${p.name}</span>
+                        <span>${p.points} pt</span>
+                     </div>`;
+        });
+        document.getElementById('rank-list').innerHTML = html;
+    }
+
+    const klContainer = document.getElementById('kill-log-container');
+    if(klContainer && gameState.killLogs) {
+        klContainer.innerHTML = gameState.killLogs.map(log => `<div class="kill-log">${log.text}</div>`).join('');
+    }
+}
+</script>
+
+<style>
+/* Brainrot風 インデックスUIのスタイル */
+#brainrot-index-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 15px;
+    padding: 15px;
+    background: #050508;
+    border: 3px solid #333;
+    border-radius: 12px;
+    max-height: 60vh;
+    overflow-y: auto;
+    box-shadow: inset 0 0 50px rgba(0,0,0,0.8);
+}
+.br-card {
+    background: #111;
+    border: 2px solid #222;
+    border-radius: 8px;
+    text-align: center;
+    padding: 10px;
+    position: relative;
+    transition: transform 0.2s;
+}
+.br-card.unlocked {
+    box-shadow: 0 0 15px var(--glow-color);
+    border-color: var(--glow-color);
+    background: linear-gradient(180deg, #222 0%, #111 100%);
+}
+.br-card.locked {
+    filter: grayscale(100%) brightness(0.3);
+}
+.br-card:hover { transform: scale(1.05); z-index: 10; }
+.br-icon { font-size: 36px; text-shadow: 0 0 10px var(--glow-color); margin-bottom: 5px; }
+.br-name { font-size: 12px; font-weight: 900; color: #fff; margin-bottom: 3px; word-break: keep-all; line-height: 1.2;}
+.br-rarity { font-size: 10px; color: var(--glow-color); font-weight: bold; letter-spacing: 1px; }
+.br-count { position: absolute; top: -5px; right: -5px; background: var(--glow-color); color: #000; font-weight: bold; padding: 2px 6px; border-radius: 10px; font-size: 12px; border: 2px solid #fff; }
+
+/* 接続人数表示を隠す */
+#true-online-counter-ui, #online-players-count, #true-online-counter-lobby {
+    display: none !important;
+}
+</style>
+
+<script>
+(function() {
+    console.log("🔥 [Ultimate Patch V3] Player Name Save, Paint System, Extreme SFX & Safe Multi-Shot.");
+
+    // --- 1. 名前保存機能 ---
+    const nameInput = document.getElementById('global-player-name');
+    if (nameInput) {
+        const savedName = localStorage.getItem('neon_arena_player_name');
+        if (savedName) nameInput.value = savedName;
+        nameInput.addEventListener('input', (e) => {
+            localStorage.setItem('neon_arena_player_name', e.target.value);
+        });
+    }
+
+    // --- 2. 塗装データと倍率の定義 ---
+    const PAINTS = {
+        normal: { id: 'normal', name: 'NORMAL', color: '#aaaaaa', glow: '#ffffff', mult: 1.0, prob: 0.70 },
+        gold: { id: 'gold', name: 'GOLD', color: '#ffd700', glow: '#ffaa00', mult: 1.3, prob: 0.20 },
+        diamond: { id: 'diamond', name: 'DIAMOND', color: '#00ffff', glow: '#0088ff', mult: 1.5, prob: 0.08 },
+        thunder: { id: 'thunder', name: 'THUNDER', color: '#ffff00', glow: '#ff0000', mult: 2.0, prob: 0.02 }
+    };
+
+    const TROPHIES = {
+        normal_trophy: { id: 'normal_trophy', name: '普通のトロフィー', icon: '🏆', baseDesc: '名誉の証' },
+        hp_trophy: { id: 'hp_trophy', name: '体力+50 トロフィー', icon: '🟢', baseDesc: '最大HP増加', val: 50 },
+        atk_trophy: { id: 'atk_trophy', name: '攻撃力UP トロフィー', icon: '🔴', baseDesc: '攻撃力増加', val: 20 },
+        luck_trophy: { id: 'luck_trophy', name: '運UP トロフィー', icon: '🔮', baseDesc: 'レア確率UP' }
+    };
+
+    function getPaintRoll() {
+        let r = Math.random();
+        if(r < PAINTS.thunder.prob) return 'thunder'; 
+        if(r < PAINTS.thunder.prob + PAINTS.diamond.prob) return 'diamond'; 
+        if(r < PAINTS.thunder.prob + PAINTS.diamond.prob + PAINTS.gold.prob) return 'gold'; 
+        return 'normal'; 
+    }
+
+    // --- 3. 超低遅延 Web Audio API 効果音エンジン ---
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    let actx = null;
+
+    function initAudio() {
+        if (!actx) actx = new AudioCtx();
+        if (actx.state === 'suspended') actx.resume();
+    }
+
+    window.addEventListener('click', initAudio, { passive: true });
+    window.addEventListener('keydown', initAudio, { passive: true });
+    window.addEventListener('touchstart', initAudio, { passive: true });
+
+    window.playSuperSFX = function(type) {
+        try {
+            initAudio();
+            if (!actx) return;
+            const osc = actx.createOscillator();
+            const gain = actx.createGain();
+            osc.connect(gain);
+            gain.connect(actx.destination);
+            const now = actx.currentTime;
+
+            if (type === 'shoot') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(600, now);
+                osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+                gain.gain.setValueAtTime(0.05, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now); osc.stop(now + 0.1);
+            } else if (type === 'damage') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 0.2);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now); osc.stop(now + 0.2);
+            } else if (type === 'kill') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.setValueAtTime(1200, now + 0.1);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now); osc.stop(now + 0.2);
+            } else if (type === 'gameover') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.linearRampToValueAtTime(50, now + 1.5);
+                gain.gain.setValueAtTime(0.4, now);
+                gain.gain.linearRampToValueAtTime(0.01, now + 1.5);
+                osc.start(now); osc.stop(now + 1.5);
+            } else if (type === 'chest_open_super') {
+                for (let i = 0; i < 4; i++) {
+                    const osc2 = actx.createOscillator();
+                    const gain2 = actx.createGain();
+                    osc2.type = 'sine';
+                    osc2.frequency.setValueAtTime(523.25 * (i + 1), now); 
+                    osc2.frequency.exponentialRampToValueAtTime(1500 + (i * 100), now + 0.5);
+                    gain2.gain.setValueAtTime(0.08, now);
+                    gain2.gain.linearRampToValueAtTime(0.001, now + 0.6);
+                    osc2.connect(gain2);
+                    gain2.connect(actx.destination);
+                    osc2.start(now);
+                    osc2.stop(now + 0.6);
+                }
+            } else if (type === 'boss_spawn_super') {
+                for (let i = 0; i < 2; i++) {
+                    const osc2 = actx.createOscillator();
+                    const gain2 = actx.createGain();
+                    osc2.type = 'sawtooth';
+                    osc2.frequency.setValueAtTime(130 + (i * 6), now);
+                    osc2.frequency.linearRampToValueAtTime(320 + (i * 6), now + 0.5);
+                    osc2.frequency.linearRampToValueAtTime(130 + (i * 6), now + 1.0);
+                    gain2.gain.setValueAtTime(0.18, now);
+                    gain2.gain.linearRampToValueAtTime(0.01, now + 1.0);
+                    osc2.connect(gain2);
+                    gain2.connect(actx.destination);
+                    osc2.start(now);
+                    osc2.stop(now + 1.0);
+                }
+            }
+        } catch (e) { console.error("SFX Error", e); }
+    };
+
+    // --- 4. 宝箱獲得演出と塗装システムの完全上書き ---
+    window.showChestResult = function() {
+        if (typeof window.playSuperSFX === 'function') window.playSuperSFX('chest_open_super');
+        document.body.classList.add('super-shake-active');
+        setTimeout(() => document.body.classList.remove('super-shake-active'), 600);
+
+        let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"hp_trophy":0, "normal_trophy":0, "atk_trophy":0, "luck_trophy":0, "equipped":""}');
+        let paints = JSON.parse(localStorage.getItem('neon_arena_paints') || '{}');
+        
+        let luckCount = col.luck_trophy || 0;
+        let probNormal = Math.max(0, 75 - (luckCount * 2));
+        let probHp = 1 + (luckCount * 1.0);
+        let probLuck = 19 + (luckCount * 0.5);
+        let probAtk = 5 + (luckCount * 0.5);
+        let total = probNormal + probHp + probLuck + probAtk;
+
+        let r = Math.random() * total;
+        let result = '';
+        let resultText = document.getElementById('chest-result-text');
+
+        if (r < probAtk) { result = 'atk_trophy'; } 
+        else if (r < probAtk + probHp) { result = 'hp_trophy'; } 
+        else if (r < probAtk + probHp + probLuck) { result = 'luck_trophy'; } 
+        else { result = 'normal_trophy'; }
+        
+        // 塗装の抽選と保存（カウントアップ）
+        let paintType = getPaintRoll();
+        if (!paints[result]) paints[result] = {};
+        paints[result][paintType] = (paints[result][paintType] || 0) + 1;
+        localStorage.setItem('neon_arena_paints', JSON.stringify(paints));
+        
+        let pInfo = PAINTS[paintType];
+        let animName = paintType === 'thunder' ? 'pulseThunder' : (paintType === 'diamond' ? 'pulseDiamond' : 'pulseGold');
+
+        resultText.innerHTML = `
+            <div style="font-size:18px; color:${pInfo.color}; text-shadow: 0 0 10px ${pInfo.glow}; font-weight:900; letter-spacing:2px; margin-bottom:15px;">[塗装: ${pInfo.name}] (効果 ${pInfo.mult}倍)</div>
+            <div style="color:#fff; text-shadow:0 0 20px ${pInfo.color};">${TROPHIES[result].name} をゲット！</div>
+        `;
+
+        col[result] = 1; // 所持フラグ
+        localStorage.setItem('neon_arena_collection', JSON.stringify(col));
+        localStorage.removeItem('pending_boss_chest');
+        
+        document.getElementById('btn-open-chest').style.display = 'none';
+        document.getElementById('chest-result').style.display = 'block';
+        document.getElementById('chest-panel').classList.add('chest-opened-bg');
+        
+        if (typeof window.updateCollectionUI === 'function') window.updateCollectionUI();
+    };
+
+    // コレクションUIの完全上書き（ROBLOX Brainrot Index UI）
+    window.updateCollectionUI = function() {
+        let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{"hp_trophy":0, "normal_trophy":0, "atk_trophy":0, "luck_trophy":0, "equipped":""}');
+        let paints = JSON.parse(localStorage.getItem('neon_arena_paints') || '{}');
+        
+        let grid = document.getElementById('col-card-grid');
+        if(grid) {
+            let html = '<div id="brainrot-index-container">';
+            
+            Object.values(TROPHIES).forEach(t => {
+                Object.values(PAINTS).forEach(pInfo => {
+                    let pId = pInfo.id;
+                    let count = (paints[t.id] && paints[t.id][pId]) ? paints[t.id][pId] : 0;
+                    let has = count > 0;
+                    let isEq = col.equipped === t.id; 
+                    
+                    let effStr = t.val ? ` (効果: +${t.val * pInfo.mult})` : '';
+                    let cardClass = has ? 'br-card unlocked' : 'br-card locked';
+                    let glowStyle = has ? `--glow-color: ${pInfo.glow};` : `--glow-color: #333;`;
+                    
+                    html += `
+                    <div class="${cardClass}" style="${glowStyle}">
+                        ${has ? `<div class="br-count">x${count}</div>` : ''}
+                        <div class="br-icon">${has ? t.icon : '❔'}</div>
+                        <div class="br-name">${has ? t.name : 'Unknown'}</div>
+                        <div class="br-rarity" style="color:${has ? pInfo.color : '#555'}">${has ? pInfo.name : '???'}</div>
+                        ${has && isEq ? `<div style="font-size:10px; color:#0f5; margin-top:5px;">[ 装備中 ]</div>` : ''}
+                        ${has && !isEq ? `<button onclick="equipTrophy('${t.id}')" style="padding:2px 5px; font-size:10px; margin-top:5px; background:var(--glow-color); color:#000; border:none; cursor:pointer; font-weight:bold;">EQUIP</button>` : ''}
+                    </div>
+                    `;
+                });
+            });
+            html += '</div>';
+            grid.innerHTML = html;
+        }
+        
+        let curEq = document.getElementById('current-equip-text');
+        if(curEq && col.equipped) {
+            curEq.innerText = TROPHIES[col.equipped].name;
+        }
+    };
+
+    // --- 5. 超高精度ゲーム監視ループ（安全な倍率・効果音・ボスルール） ---
+    let deathCount = 0;
+    let isDeadState = false;
+    let gameOverTriggered = false;
+    let prevAmmo = -1;
+    let prevHp = -1;
+    let prevPoints = -1;
+    let prevBulletsLength = 0;
+
+    function ultimatePatchLoop() {
+        requestAnimationFrame(ultimatePatchLoop);
+        const gState = window.gameState;
+        if (!gState) return;
+
+        const myIdStr = window.myId;
+        let me = gState.players ? gState.players[myIdStr] : null;
+        const isBossMatch = (window.roomNumber === "BOSS" || gState.bossDifficulty || gState.mode === 'boss' || gState.boss);
+
+        // 【安全な倍率反映システム】
+        if (me && isBossMatch) {
+            let col = JSON.parse(localStorage.getItem('neon_arena_collection') || '{}');
+            let paints = JSON.parse(localStorage.getItem('neon_arena_paints') || '{}');
+            let myEq = col.equipped;
+
+            // 塗装効果の判定（一番持っているレアな塗装を優先適用するなどもあるが、ここでは最後に引いたものや代表を適用）
+            // 簡易的に、装備中のトロフィーの塗装の中で一番倍率が高いものを探す
+            let bestMult = 1.0;
+            if (paints[myEq]) {
+                if (paints[myEq]['thunder']) bestMult = 2.0;
+                else if (paints[myEq]['diamond']) bestMult = 1.5;
+                else if (paints[myEq]['gold']) bestMult = 1.3;
+            }
+
+            // HPトロフィーの倍率適用
+            if (myEq === 'hp_trophy') {
+                let targetMaxHp = 100 + (50 * bestMult);
+                if (me.maxHp !== targetMaxHp) {
+                    let hpRatio = me.hp / me.maxHp;
+                    me.maxHp = targetMaxHp;
+                    me.hp = targetMaxHp * hpRatio;
+                }
+            }
+
+            // 攻撃トロフィーの倍率適用 (マルチプルショット)
+            // 自分が弾を撃った瞬間に、確率で弾を複製して追加発射する
+            if (myEq === 'atk_trophy' && gState.bullets) {
+                if (gState.bullets.length > prevBulletsLength) {
+                    // 新しい弾が追加された
+                    let newBullet = gState.bullets[gState.bullets.length - 1];
+                    if (newBullet && newBullet.owner === myIdStr && !newBullet.isClone) {
+                        let shootExtra = false;
+                        if (bestMult >= 2.0) shootExtra = true; // 雷：確定2発
+                        else if (bestMult >= 1.5 && Math.random() < 0.5) shootExtra = true; // ダイヤ：50%で2発
+                        else if (bestMult >= 1.3 && Math.random() < 0.3) shootExtra = true; // 金：30%で2発
+
+                        if (shootExtra) {
+                            gState.bullets.push({
+                                owner: myIdStr,
+                                x: newBullet.x + (Math.random() - 0.5) * 10,
+                                y: newBullet.y + (Math.random() - 0.5) * 10,
+                                vx: newBullet.vx,
+                                vy: newBullet.vy,
+                                life: newBullet.life,
+                                color: newBullet.color,
+                                isClone: true
+                            });
+                        }
+                    }
+                }
+                prevBulletsLength = gState.bullets.length;
+            }
+        }
+
+        // 【効果音トリガー】
+        if (me) {
+            let currentAmmo = me.ammo !== undefined ? me.ammo : window.ammo;
+            if (prevAmmo !== -1 && currentAmmo < prevAmmo && (prevAmmo - currentAmmo < 10)) {
+                window.playSuperSFX('shoot');
+            }
+            prevAmmo = currentAmmo;
+
+            let currentHp = me.hp !== undefined ? me.hp : 100;
+            if (prevHp !== -1 && currentHp < prevHp && currentHp > 0) {
+                window.playSuperSFX('damage');
+            }
+            
+            if (currentHp <= 0 && !isDeadState) {
+                isDeadState = true;
+                deathCount++;
+                window.playSuperSFX('damage');
+            } else if (currentHp > 0) {
+                isDeadState = false;
+            }
+            prevHp = currentHp;
+
+            let currentPoints = me.points !== undefined ? me.points : 0;
+            if (prevPoints !== -1 && currentPoints > prevPoints) {
+                window.playSuperSFX('kill');
+            }
+            prevPoints = currentPoints;
+        }
+
+        // 【BOSSマッチ：3回死亡で強制終了 ＆ 宝箱没収】
+        if (isBossMatch) {
+            if (gState.chest) { gState.chest.active = false; gState.chest.visible = false; gState.chest.x = -99999; }
+            
+            if (deathCount >= 3 && !gameOverTriggered) {
+                gameOverTriggered = true;
+                window.playSuperSFX('gameover');
+
+                localStorage.removeItem('pending_boss_chest');
+                const chestPanel = document.getElementById('chest-panel');
+                if (chestPanel) {
+                    chestPanel.style.display = 'none';
+                    chestPanel.style.opacity = '0';
+                    if(chestPanel.classList) chestPanel.classList.remove('chest-opened-bg');
+                }
+
+                const goScreen = document.createElement('div');
+                goScreen.style.position = 'fixed';
+                goScreen.style.inset = '0';
+                goScreen.style.background = 'radial-gradient(circle, rgba(60,0,10,0.95) 0%, rgba(10,5,5,1) 100%)';
+                goScreen.style.zIndex = '9999999';
+                goScreen.style.display = 'flex';
+                goScreen.style.flexDirection = 'column';
+                goScreen.style.alignItems = 'center';
+                goScreen.style.justifyContent = 'center';
+                goScreen.style.color = '#ff0055';
+                goScreen.style.fontFamily = 'monospace, sans-serif';
+                
+                goScreen.innerHTML = `
+                    <div style="font-size: 64px; font-weight: 900; text-shadow: 0 0 30px #ff0055; animation: pulseGO 1s infinite alternate;">GAME OVER</div>
+                    <div style="font-size: 24px; color: #fff; margin: 20px 0; font-weight: bold;">BOSSマッチで3回撃破されました</div>
+                    <div style="font-size: 16px; color: #ff5555; margin-bottom: 40px; font-weight: bold;">[ PENALTY ] 宝箱は獲得できませんでした</div>
+                    <button id="btn-force-return" style="padding: 15px 40px; font-size: 20px; font-weight: bold; background: #000; color: #fff; border: 3px solid #ff0055; border-radius: 8px; cursor: pointer; box-shadow: 0 0 20px rgba(255,0,85,0.6);">ロビーへ戻る</button>
+                    <style>
+                        @keyframes pulseGO { from { transform: scale(0.95); opacity: 0.8; } to { transform: scale(1.05); opacity: 1; } }
+                        #btn-force-return:hover { background: #ff0055 !important; color: #fff !important; transform: scale(1.05); }
+                    </style>
+                `;
+                document.body.appendChild(goScreen);
+                document.getElementById('btn-force-return').addEventListener('click', () => { location.reload(); });
+
+                gState.isTimeUp = true;
+                gState.timeLeft = 0;
+            }
+        }
+    }
+    
+    ultimatePatchLoop();
+
+    // 既存のアナウンス監視
+    const domObserver = new MutationObserver((mutations) => {
+        mutations.forEach((m) => {
+            const txt = m.target.textContent || "";
+            if (txt.includes("BOSS") || txt.includes("ボス")) {
+                if(typeof window.playSuperSFX === 'function') window.playSuperSFX('boss_spawn_super');
+            }
+        });
+    });
+    const targetAnnounce = document.getElementById('global-announcement');
+    if (targetAnnounce) domObserver.observe(targetAnnounce, { childList: true, characterData: true, subtree: true });
+
+})();
+</script>
+</body>
+</html>
