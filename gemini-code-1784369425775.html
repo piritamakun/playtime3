@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-select=none">
+    <title>PSYCHO PARANOIA -REALITY DECAY MAX V4-</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-touch-callout: none; }
+        body, html {
+            width: 100%; height: 100%; background: #000001;
+            color: #444; font-family: "MS Mincho", "Hiragino Mincho ProN", serif; overflow: hidden;
+        }
+        body.playing #canvas { cursor: none; }
+        #canvas { display: block; position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
+        
+        /* 映画的シネマUI */
+        #ui {
+            position: fixed; top: 30px; left: 30px; z-index: 20;
+            font-family: 'Courier New', monospace; font-size: 1.2rem; color: #400;
+            pointer-events: none; letter-spacing: 0.3rem; text-shadow: 0 0 12px #000;
+            animation: pulse-ui 4s infinite;
+        }
+        @keyframes pulse-ui { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.9; } }
+
+        /* 手記 */
+        #note-popup {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 85%; max-width: 550px; background: rgba(0, 0, 0, 0.99);
+            border: 1px solid #300; padding: 50px; z-index: 400; display: none;
+            color: #888; font-size: 1.05rem; line-height: 2.6; text-align: justify;
+            box-shadow: 0 0 150px #000; cursor: pointer;
+        }
+
+        /* 画面共通レイヤー */
+        .screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center;
+            align-items: center; z-index: 100; background: #000; overflow-y: auto; padding: 20px;
+        }
+        #start-screen h1 {
+            color: #300; letter-spacing: 1.5rem; margin-bottom: 20px;
+            font-size: 3.5rem; text-shadow: 0 0 50px rgba(255,0,0,0.3); font-weight: 100;
+            text-align: center; animation: text-flicker 3s infinite;
+        }
+        #start-screen p { line-height: 2.4; text-align: center; font-size: 0.9rem; color: #444; margin-bottom: 40px; max-width: 700px; }
+        
+        .btn-group { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; justify-content: center; }
+        .btn {
+            padding: 18px 50px; background: #020000; color: #555; border: 1px solid #200;
+            font-size: 0.95rem; cursor: pointer; letter-spacing: 0.4rem; transition: 0.4s;
+        }
+        .btn:hover { background: #400; color: #fff; box-shadow: 0 0 40px rgba(255,0,0,0.8); border-color: #f00; }
+        .btn.secondary { border-color: #444; color: #888; }
+        .btn.secondary:hover { background: #222; color: #fff; box-shadow: 0 0 30px rgba(255,255,255,0.2); border-color: #fff; }
+
+        /* 設定モーダル画面 */
+        #config-screen { display: none; z-index: 200; background: rgba(0,0,0,0.98); border: 1px solid #111; }
+        .config-box { width: 90%; max-width: 500px; color: #aaa; font-size: 0.95rem; }
+        .config-title { font-size: 1.8rem; color: #500; letter-spacing: 0.5rem; margin-bottom: 30px; text-align: center; border-bottom: 1px solid #200; padding-bottom: 10px; }
+        .config-item { margin-bottom: 25px; display: flex; flex-direction: column; gap: 10px; }
+        .config-item label { letter-spacing: 0.1rem; color: #777; }
+        .config-row { display: flex; gap: 15px; }
+        .config-btn {
+            flex: 1; padding: 12px; background: #111; border: 1px solid #333; color: #666;
+            cursor: pointer; text-align: center; letter-spacing: 0.2rem; transition: 0.3s;
+        }
+        .config-btn.active { background: #500; color: #fff; border-color: #f00; box-shadow: 0 0 15px rgba(255,0,0,0.5); }
+        .slider { -webkit-appearance: none; width: 100%; height: 6px; background: #222; outline: none; border-radius: 3px; }
+        .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #600; border: 1px solid #f00; cursor: pointer; border-radius: 50%; }
+
+        @keyframes text-flicker {
+            0%, 100% { opacity: 1; filter: blur(0px); }
+            48% { opacity: 0.8; filter: blur(1px); }
+            50% { opacity: 0.1; }
+            53% { opacity: 0.9; }
+        }
+
+        /* モバイル用操作UI */
+        #mobile-ui-container { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 50; pointer-events: none; }
+        #virtual-joystick {
+            position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px;
+            background: rgba(20, 0, 0, 0.2); border: 2px solid rgba(100, 0, 0, 0.4);
+            border-radius: 50%; pointer-events: auto; display: flex; justify-content: center; align-items: center;
+        }
+        #joystick-knob {
+            width: 50px; height: 50px; background: rgba(150, 0, 0, 0.4);
+            border: 1px solid rgba(255, 0, 0, 0.6); border-radius: 50%; transition: transform 0.05s linear;
+        }
+        #mobile-light-btn {
+            position: absolute; bottom: 50px; right: 40px; width: 80px; height: 80px;
+            background: rgba(40, 0, 0, 0.5); border: 2px solid #500; border-radius: 50%;
+            pointer-events: auto; display: flex; justify-content: center; align-items: center;
+            color: #a44; font-weight: bold; font-family: monospace; font-size: 0.9rem; letter-spacing: 0.1rem;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+        #mobile-light-btn:active { background: #600; color: #fff; border-color: #f00; }
+
+        /* ジャンプスケア・ビジュアルエフェクト */
+        #scare-container {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 500; display: none; background: #000; overflow: hidden; pointer-events: none;
+        }
+        .scare-active { display: block !important; }
+        .scare-stage { position: absolute; width: 100%; height: 100%; display: none; justify-content: center; align-items: center; box-sizing: border-box; }
+
+        #s-strobe { animation: heavy-strobe 0.01s infinite, shake-insane 0.01s infinite; background: #fff; }
+        #s-strobe .scare-visual { font-size: 75vw; color: #000; filter: contrast(100) invert(1); }
+        #s-chromatic { animation: chromatic-glitch 0.02s infinite, shake-insane 0.01s infinite; color: #fff; font-size: 6vw; font-family: monospace; font-weight: bold; text-align: center; line-height: 1.2; }
+        #s-tear { animation: screen-tear 0.01s infinite; background: #111; }
+        #s-void { animation: heavy-strobe 0.02s infinite; background: #000; }
+        #s-void .face-vector { width: 95vw; height: 95vh; border: 30px double #f00; animation: scale-up-insane 0.08s infinite alternate; filter: blur(10px) contrast(50); }
+
+        @keyframes heavy-strobe { 0%, 100% { background: #000; filter: invert(0); } 50% { background: #fff; filter: invert(1); } }
+        @keyframes shake-insane {
+            0% { transform: translate(60px, -60px) scale(1.6) rotate(6deg); }
+            25% { transform: translate(-60px, 40px) scale(1.4) rotate(-6deg); }
+            50% { transform: translate(40px, 60px) scale(1.7) rotate(12deg); filter: hue-rotate(120deg); }
+            75% { transform: translate(-50px, -50px) scale(1.5) rotate(-10deg); }
+            100% { transform: translate(50px, -30px) scale(1.6) rotate(0deg); }
+        }
+        @keyframes chromatic-glitch {
+            0% { text-shadow: 35px 0 0 #f00, -35px 0 0 #00f; filter: saturate(20) contrast(8); }
+            50% { text-shadow: -45px 15px 0 #0f0, 45px -15px 0 #f0f; filter: invert(1); }
+            100% { text-shadow: 25px -25px 0 #00f, -25px 25px 0 #f00; }
+        }
+        @keyframes screen-tear {
+            0% { background: repeating-linear-gradient(0deg, #000, #000 8px, #fff 8px, #fff 16px); transform: skewX(-35deg); }
+            50% { background: repeating-linear-gradient(90deg, #fff, #fff 4px, #000 4px, #000 12px); transform: skewX(35deg) scaleY(2.5); filter: invert(1); }
+            100% { background: repeating-linear-gradient(180deg, #111, #111 25px, #eee 25px, #eee 35px); transform: skewX(0deg); }
+        }
+        @keyframes scale-up-insane { 0% { transform: scale(0.3) skewY(-25deg); } 100% { transform: scale(2.5) skewY(25deg); } }
+
+        /* クリア画面 */
+        #clear-screen { display: none; z-index: 600; background: #000; }
+        #clear-screen.fade-in { display: flex; animation: clear-fade 5s forwards; }
+        @keyframes clear-fade { 0% { background: #000; opacity: 0; } 100% { background: #fff; opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <div id="ui"><span id="ui-integrity-txt">MEMORY INTEGRITY</span>: <span id="key-count">0</span> / 6</div>
+
+    <!-- メインCanvas -->
+    <canvas id="canvas"></canvas>
+    
+    <!-- スマホ専用操作レイヤー -->
+    <div id="mobile-ui-container">
+        <div id="virtual-joystick"><div id="joystick-knob"></div></div>
+        <div id="mobile-light-btn">LIGHT</div>
+    </div>
+
+    <!-- 手記ポップアップ -->
+    <div id="note-popup" onclick="closeNote()"></div>
+
+    <!-- ジャンプスケアマスターコア -->
+    <div id="scare-container">
+        <div id="s-strobe" class="scare-stage"><div class="scare-visual">👁️</div></div>
+        <div id="s-chromatic" class="scare-stage" id="scare-text-box">CRITICAL_HAZARD<br>MEMORY_CORRUPTED<br>SYSTEM_FAILURE</div>
+        <div id="s-tear" class="scare-stage"></div>
+        <div id="s-void" class="scare-stage"><div class="face-vector" style="background: radial-gradient(#f00, #000 65%);"></div></div>
+    </div>
+
+    <!-- メインスタート画面 -->
+    <div id="start-screen" class="screen">
+        <h1 id="start-title">PSYCHO PARANOIA</h1>
+        <p id="start-desc">Loading...</p>
+        <div class="btn-group">
+            <button class="btn" id="btn-connect" onclick="initGame()">Connect to Abyss</button>
+            <button class="btn secondary" id="btn-config" onclick="toggleConfig(true)">Environment Config</button>
+        </div>
+    </div>
+
+    <!-- 環境設定モーダル画面 -->
+    <div id="config-screen" class="screen">
+        <div class="config-box">
+            <div class="config-title" id="cfg-title">ENVIRONMENT</div>
+            
+            <div class="config-item">
+                <label id="cfg-label-lang">Language / 言語</label>
+                <div class="config-row">
+                    <button id="lang-en" class="config-btn active" onclick="setLanguage('en')">English</button>
+                    <button id="lang-ja" class="config-btn" onclick="setLanguage('ja')">日本語</button>
+                </div>
+            </div>
+
+            <div class="config-item">
+                <label id="cfg-label-device">Device Input Mode</label>
+                <div class="config-row">
+                    <button id="dev-pc" class="config-btn active" onclick="setDeviceMode('pc')">PC (Keyboard)</button>
+                    <button id="dev-mobile" class="config-btn" onclick="setDeviceMode('mobile')">SP (Touch)</button>
+                </div>
+            </div>
+
+            <div class="config-item">
+                <label id="cfg-label-dark">Darkness Multiplier</label>
+                <input type="range" id="cfg-darkness" class="slider" min="5" max="95" value="65" oninput="applyConfig()">
+            </div>
+
+            <div class="config-item">
+                <label id="cfg-label-bgm">Ambient BGM Volume</label>
+                <input type="range" id="cfg-bgm" class="slider" min="0" max="100" value="50" oninput="applyConfig()">
+            </div>
+
+            <div class="config-item">
+                <label id="cfg-label-se">Scare EFFECT Volume</label>
+                <input type="range" id="cfg-se" class="slider" min="0" max="100" value="85" oninput="applyConfig()">
+            </div>
+
+            <button class="btn" id="cfg-btn-save" style="width:100%; margin-top:20px;" onclick="toggleConfig(false)">Save Configuration</button>
+        </div>
+    </div>
+
+    <!-- クリア画面 -->
+    <div id="clear-screen" class="screen">
+        <h2 id="clear-title" style="color:#000; font-size:4rem; font-weight:100; letter-spacing: 2rem; margin-bottom:30px; animation: text-flicker 4s infinite;">SURVIVED</h2>
+        <p id="clear-desc" style="margin-bottom:50px; color:#666; letter-spacing: 0.1rem; text-align:center; line-height:2;">Successfully synchronized all memory circuits.</p>
+        <button class="btn" id="clear-btn-reload" style="background:#fff; color:#000; border:1px solid #ddd;" onclick="location.reload()">Reconnect</button>
+    </div>
+
+    <script>
+        // ========================================================
+        // ★ 言語リソースデータ（初期設定：英語 'en'）
+        // ========================================================
+        let langMode = 'en';
+        const langData = {
+            en: {
+                title: "PSYCHO PARANOIA",
+                integrity: "MEMORY INTEGRITY",
+                desc: "Move: <b>W, A, S, D</b> (PC) / <b>Virtual Stick</b> (Touch)<br>Light ON/OFF: <b>[ F ] Key</b> (PC) / <b>LIGHT Button</b> (Touch)<br>Close Note: <b>[ B ] Key</b> (PC) / <b>Tap Screen</b> (Common)<br><br>A vast, distorted isolation ward. Collect 6 生体記憶 Memory Fragments (🔑) and return to the central Collapse Gate (🚪).<br>The abyss tracks you with physical mass. Watch out for phantoms at the edge of sight, and terrifying footsteps mimicking yours when you freeze.",
+                btnConnect: "Connect to Abyss",
+                btnConfig: "Environment Config",
+                cfgTitle: "ENVIRONMENT",
+                cfgLang: "Language / 言語",
+                cfgDevice: "Device Input Mode",
+                cfgDark: "Darkness Multiplier",
+                cfgBgm: "Ambient BGM Volume",
+                cfgSe: "Scare EFFECT Volume",
+                cfgSave: "Save Configuration",
+                noteText: "【Fragment of Dissected Consciousness】<br>『Listen closely to their footsteps. When you stop, the crawling shadow behind you catches up. Move again or sweep the area with light before it gets too close. Otherwise, the space itself will collapse into distortion.』",
+                noteClose: "<br><br><span style='color:#500; font-size:0.85rem; font-weight:bold; letter-spacing:0.1rem;'>[ Tap screen or Press B to close note and face the abyss ]</span>",
+                clearTitle: "SURVIVED",
+                clearDesc: "Successfully synchronized all memory circuits.<br>Your consciousness has been salvaged back to the reality layer.",
+                clearBtn: "Reconnect",
+                bugs: ["DIE", "ERROR", "VOID", "RUN", "👁️💀👁️"]
+            },
+            ja: {
+                title: "PSYCHO PARANOIA",
+                integrity: "精神同調回路",
+                desc: "移動: <b>W, A, S, D</b> (PC)  /  <b>仮想スティック</b> (スマホ)<br>ライトON/OFF: <b>【 F 】キー</b> (PC)  /  <b>LIGHTボタン</b> (スマホ)<br>手記を閉じる: <b>【 B 】キー</b> (PC)  /  <b>画面タップ</b> (スマホ/PC共通)<br><br>歪みの肥大化した隔離迷棟。6つの生体記憶（🔑）を集め、中央の崩壊門（🚪）へ還れ。<br>闇の底から迫る“何か”の質量。さらに、視界の境界に蠢く幻影とお前の背後を追う狂気の足音を感知せよ。",
+                btnConnect: "深淵へ接続",
+                btnConfig: "環境設定",
+                cfgTitle: "環境設定",
+                cfgLang: "Language / 言語",
+                cfgDevice: "操作デバイスモード",
+                cfgDark: "画面の暗黒度",
+                cfgBgm: "環境BGM音量",
+                cfgSe: "ジャンプスケア音量",
+                cfgSave: "設定を保存",
+                noteText: "【解剖された意識の断片】<br>『奴らの足音に耳をすませ。こちらが足を止めた時、遅れて背後を這う影の歩法が近づく。極限まで近づかれる前に、再び動くかライトで周囲を薙ぎ払え。さもなくば空間ごと引き裂かれる。』",
+                noteClose: "<br><br><span style='color:#500; font-size:0.85rem; font-weight:bold; letter-spacing:0.2rem;'>[ タップまたはBキーで画面を閉じ、生還せよ ]</span>",
+                clearTitle: "生 還",
+                clearDesc: "すべての記憶回路の同期に成功。<br>あなたの意識層は、現実の安全圏へとサルベージされましたされましたされました。",
+                clearBtn: "再接続する",
+                bugs: ["死死死", "ERROR", "VOID", "縺ゅ≠縺ゅ≠", "👁️💀👁️"]
+            }
+        };
+
+        function updateLanguageUI() {
+            let d = langData[langMode];
+            document.getElementById('start-title').innerHTML = d.title;
+            document.getElementById('start-desc').innerHTML = d.desc;
+            document.getElementById('btn-connect').innerText = d.btnConnect;
+            document.getElementById('btn-config').innerText = d.btnConfig;
+            document.getElementById('ui-integrity-txt').innerText = d.integrity;
+            
+            document.getElementById('cfg-title').innerText = d.cfgTitle;
+            document.getElementById('cfg-label-lang').innerText = d.cfgLang;
+            document.getElementById('cfg-label-device').innerText = d.cfgDevice;
+            document.getElementById('cfg-label-dark').innerText = d.cfgDark;
+            document.getElementById('cfg-label-bgm').innerText = d.cfgBgm;
+            document.getElementById('cfg-label-se').innerText = d.cfgSe;
+            document.getElementById('cfg-btn-save').innerText = d.cfgSave;
+
+            document.getElementById('clear-title').innerText = d.clearTitle;
+            document.getElementById('clear-desc').innerHTML = d.clearDesc;
+            document.getElementById('clear-btn-reload').innerText = d.clearBtn;
+        }
+
+        function setLanguage(lang) {
+            langMode = lang;
+            document.getElementById('lang-en').classList.toggle('active', lang === 'en');
+            document.getElementById('lang-ja').classList.toggle('active', lang === 'ja');
+            updateLanguageUI();
+        }
+
+        // 基本変数
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const keyCountUI = document.getElementById('key-count');
+        const notePopup = document.getElementById('note-popup');
+        const scareContainer = document.getElementById('scare-container');
+        const scareStages = [
+            document.getElementById('s-strobe'),
+            document.getElementById('s-chromatic'),
+            document.getElementById('s-tear'),
+            document.getElementById('s-void')
+        ];
+
+        let maskCanvas = null, maskCtx = null;
+        const TILE_SIZE = 100;
+
+        const map = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,1],
+            [1,0,1,0,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,0,1],
+            [1,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1,0,1],
+            [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1,1,1,1,1,0,1],
+            [1,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+            [1,1,1,1,0,0,1,1,1,0,0,0,1,1,1,0,0,1,1,1,1],
+            [1,0,0,1,0,0,0,0,1,0,0,0,1,0,0,0,0,1,0,0,1],
+            [1,0,0,1,1,1,0,0,1,1,0,1,1,0,0,1,1,1,0,0,1],
+            [1,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1],
+            [1,1,1,0,0,1,0,1,1,0,0,0,1,1,0,1,0,0,1,1,1],
+            [1,0,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1],
+            [1,0,0,1,1,1,0,1,1,1,1,1,1,1,0,1,1,1,0,0,1],
+            [1,0,0,1,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,0,1],
+            [1,1,1,1,0,0,1,1,1,0,1,0,1,1,1,0,0,1,1,1,1],
+            [1,0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0,1],
+            [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1,1,1,1,1,0,1],
+            [1,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1,0,1],
+            [1,0,1,0,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,0,1],
+            [1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        let isPlaying = false, isScareRunning = false, isReadingNote = false;
+        let deviceMode = 'pc';
+        let valDarkness = 0.65, valBgmVol = 0.5, valSeVol = 0.85;
+
+        let keys = {}, mouse = { x: 0, y: 0 }, stepCounter = 0, ambientTimer = 0;
+        let player = { x: 1.5 * TILE_SIZE, y: 1.5 * TILE_SIZE, size: 12, speed: 4.5, angle: 0 };
+        let lightOn = true, lightFlickerFrame = 0;
+
+        let touchStick = { active: false, startX: 0, startY: 0, curX: 0, curY: 0, dx: 0, dy: 0 };
+        let stalker = { x: 0, y: 0, active: false, intensity: 0, speed: 3.2 };
+        let phantom = { x: 0, y: 0, visible: false, frame: 0 };
+        let ghostFootstep = { active: false, timer: 0, count: 0, delay: 0 };
+
+        // ========================================================
+        // ★ 新恐怖ギミックシステム（ブレイングリッチ＆ブラッドフォール）
+        // ========================================================
+        let brainGlitch = { active: false, frame: 0, intensityX: 0, intensityY: 0 };
+        let bloodRain = { active: false, particles: [] };
+
+        let items = [
+            { x: 19.5 * TILE_SIZE, y: 1.5 * TILE_SIZE, active: true },
+            { x: 1.5 * TILE_SIZE, y: 19.5 * TILE_SIZE, active: true },
+            { x: 19.5 * TILE_SIZE, y: 19.5 * TILE_SIZE, active: true },
+            { x: 10.5 * TILE_SIZE, y: 1.5 * TILE_SIZE, active: true },
+            { x: 1.5 * TILE_SIZE, y: 11.5 * TILE_SIZE, active: true },
+            { x: 19.5 * TILE_SIZE, y: 11.5 * TILE_SIZE, active: true }
+        ];
+
+        let notes = [
+            { x: 10.5 * TILE_SIZE, y: 5.5 * TILE_SIZE, active: true }
+        ];
+
+        let fakeItems = [
+            { x: 5.5 * TILE_SIZE, y: 5.5 * TILE_SIZE, active: true },
+            { x: 15.5 * TILE_SIZE, y: 15.5 * TILE_SIZE, active: true },
+            { x: 10.5 * TILE_SIZE, y: 15.5 * TILE_SIZE, active: true }
+        ];
+
+        let bloodStains = [], collectedKeys = 0;
+        let exitDoor = { x: 10.5 * TILE_SIZE, y: 10.5 * TILE_SIZE };
+
+        let audioCtx = null, masterBgmGain = null, masterSeGain = null;
+        let lowDroneNode = null, heartbeatInterval = null;
+
+        function toggleConfig(show) { document.getElementById('config-screen').style.display = show ? 'flex' : 'none'; }
+        
+        function setDeviceMode(mode) {
+            deviceMode = mode;
+            document.getElementById('dev-pc').classList.toggle('active', mode === 'pc');
+            document.getElementById('dev-mobile').classList.toggle('active', mode === 'mobile');
+        }
+
+        function applyConfig() {
+            valDarkness = parseInt(document.getElementById('cfg-darkness').value) / 100;
+            valBgmVol = parseInt(document.getElementById('cfg-bgm').value) / 100;
+            valSeVol = parseInt(document.getElementById('cfg-se').value) / 100;
+            if (masterBgmGain) masterBgmGain.gain.setValueAtTime(valBgmVol, audioCtx.currentTime);
+            if (masterSeGain) masterSeGain.gain.setValueAtTime(valSeVol, audioCtx.currentTime);
+        }
+
+        // 入力制御
+        window.addEventListener('keydown', e => {
+            let key = e.key.toLowerCase();
+            if (isReadingNote) { if (key === 'b') closeNote(); return; }
+            if (deviceMode === 'pc' && key === 'f' && isPlaying && !isScareRunning) triggerLightToggle();
+            if (!isScareRunning) keys[key] = true;
+        });
+        window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+        window.addEventListener('mousemove', e => { if (deviceMode === 'pc') { mouse.x = e.clientX; mouse.y = e.clientY; } });
+
+        const joystick = document.getElementById('virtual-joystick');
+        const knob = document.getElementById('joystick-knob');
+
+        joystick.addEventListener('touchstart', e => {
+            touchStick.active = true;
+            let t = e.touches[0];
+            touchStick.startX = t.clientX; touchStick.startY = t.clientY;
+        });
+        window.addEventListener('touchmove', e => {
+            if (!touchStick.active) return;
+            let t = e.touches[0];
+            let mx = t.clientX - touchStick.startX, my = t.clientY - touchStick.startY;
+            let dist = Math.sqrt(mx*mx + my*my), maxDist = 45;
+            if (dist > maxDist) { mx = (mx / dist) * maxDist; my = (my / dist) * maxDist; }
+            knob.style.transform = `translate(${mx}px, ${my}px)`;
+            touchStick.dx = mx / maxDist; touchStick.dy = my / maxDist;
+            if (Math.abs(mx) > 5 || Math.abs(my) > 5) player.angle = Math.atan2(my, mx);
+        }, { passive: true });
+
+        window.addEventListener('touchend', () => {
+            touchStick.active = false; knob.style.transform = 'translate(0px, 0px)';
+            touchStick.dx = 0; touchStick.dy = 0;
+        });
+
+        document.getElementById('mobile-light-btn').addEventListener('touchstart', e => {
+            e.preventDefault(); if (isPlaying && !isScareRunning) triggerLightToggle();
+        });
+
+        function triggerLightToggle() {
+            lightOn = !lightOn; playClickAudio();
+            if(!lightOn) {
+                stalker.active = true;
+                stalker.x = player.x - Math.cos(player.angle) * 350;
+                stalker.y = player.y - Math.sin(player.angle) * 350;
+            } else { stalker.active = false; }
+        }
+
+        function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+        window.addEventListener('resize', resizeCanvas);
+
+        // ========================================================
+        // ★ 高度音響エンジン（不気味ドローン＋環境ノイズ）
+        // ========================================================
+        function initAudioEngine() {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                masterBgmGain = audioCtx.createGain();
+                masterSeGain = audioCtx.createGain();
+                masterBgmGain.connect(audioCtx.destination);
+                masterSeGain.connect(audioCtx.destination);
+                
+                applyConfig();
+
+                lowDroneNode = audioCtx.createOscillator();
+                let droneFilter = audioCtx.createBiquadFilter();
+                lowDroneNode.type = 'sawtooth';
+                lowDroneNode.frequency.setValueAtTime(48, audioCtx.currentTime); // G#0の超低周波
+                droneFilter.type = 'lowpass'; droneFilter.frequency.setValueAtTime(80, audioCtx.currentTime);
+                lowDroneNode.connect(droneFilter); droneFilter.connect(masterBgmGain);
+                lowDroneNode.start();
+
+                heartbeatInterval = setInterval(() => {
+                    if (isPlaying && !isScareRunning) playHeartbeatPulse();
+                }, 1100); // 鼓動をより速く、焦燥感を高める
+            } catch(e){}
+        }
+
+        function playHeartbeatPulse() {
+            let now = audioCtx.currentTime;
+            let osc1 = audioCtx.createOscillator(), g1 = audioCtx.createGain();
+            osc1.type = 'sine'; osc1.frequency.setValueAtTime(60, now);
+            osc1.frequency.exponentialRampToValueAtTime(5, now + 0.18);
+            g1.gain.setValueAtTime(1.4, now); g1.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+            osc1.connect(g1); g1.connect(masterBgmGain); osc1.start(); osc1.stop(now + 0.19);
+        }
+
+        function playClickAudio() {
+            if (!audioCtx) return;
+            let now = audioCtx.currentTime;
+            let osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(50, now);
+            gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
+            osc.connect(gain); gain.connect(masterSeGain); osc.start(); osc.stop(now + 0.03);
+        }
+
+        function playGhostFootstepAudio() {
+            if (!audioCtx) return;
+            let now = audioCtx.currentTime;
+            let osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+            let filter = audioCtx.createBiquadFilter();
+            osc.type = 'triangle'; osc.frequency.setValueAtTime(80, now);
+            osc.frequency.linearRampToValueAtTime(20, now + 0.15);
+            filter.type = 'lowpass'; filter.frequency.setValueAtTime(200, now);
+            gain.gain.setValueAtTime(0.6, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+            osc.connect(filter); filter.connect(gain); gain.connect(masterSeGain);
+            osc.start(); osc.stop(now + 0.16);
+        }
+
+        // 【新環境ノイズ】脳髄破断グリッチ用サウンド
+        function playGlitchGlanceAudio() {
+            if (!audioCtx) return;
+            let now = audioCtx.currentTime;
+            let osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+            osc.type = 'square'; osc.frequency.setValueAtTime(1800, now);
+            osc.frequency.setValueAtTime(80, now + 0.05);
+            gain.gain.setValueAtTime(0.7, now); gain.gain.linearRampToValueAtTime(0.001, now + 0.12);
+            osc.connect(gain); gain.connect(masterSeGain); osc.start(); osc.stop(now + 0.13);
+        }
+
+        // ========================================================
+        // ★ 限界突破ジャンプスケア音響（高金属摩擦波形結合）
+        // ========================================================
+        function playUltimateScream() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+
+            let distortion = audioCtx.createWaveShaper();
+            let makeCurve = (amount) => {
+                let k = amount, n = 44100, curve = new Float32Array(n), x;
+                for (let i = 0 ; i < n; ++i ) {
+                    x = (i * 2) / n - 1;
+                    curve[i] = (3 + k) * x * 65 * Math.PI / (3 + 65 * k * Math.abs(x));
+                }
+                return curve;
+            };
+            distortion.curve = makeCurve(400); // 歪み係数を過去最大へ
+            distortion.oversample = '4x';
+
+            // 重低音ブラスト
+            let subOsc = audioCtx.createOscillator(), subGain = audioCtx.createGain();
+            subOsc.type = 'sawtooth'; subOsc.frequency.setValueAtTime(180, now);
+            subOsc.frequency.linearRampToValueAtTime(1, now + 0.6);
+            subGain.gain.setValueAtTime(3.5, now); // 音圧ブースト
+            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+            subOsc.connect(distortion); distortion.connect(subGain); subGain.connect(masterSeGain);
+            subOsc.start(); subOsc.stop(now + 0.61);
+
+            // 超高周波金属摩擦音
+            let earOsc = audioCtx.createOscillator(), earGain = audioCtx.createGain();
+            earOsc.type = 'square'; earOsc.frequency.setValueAtTime(11000, now);
+            earGain.gain.setValueAtTime(0.8, now); earGain.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+            earOsc.connect(earGain); earGain.connect(masterSeGain);
+            earOsc.start(); earOsc.stop(now + 1.5);
+
+            // 破壊的不協和フェイズ合唱
+            for (let i = 0; i < 12; i++) {
+                let osc = audioCtx.createOscillator(), gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                let f = 200 + (Math.random() * 2500);
+                osc.frequency.setValueAtTime(f, now);
+                osc.frequency.linearRampToValueAtTime(f * 0.05, now + 0.5);
+                gain.gain.setValueAtTime(0.7, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+                osc.connect(distortion); distortion.connect(gain); gain.connect(masterSeGain);
+                osc.start(); osc.stop(now + 0.55);
+            }
+        }
+
+        function initGame() {
+            document.getElementById('start-screen').style.display = 'none';
+            if (deviceMode === 'mobile') document.getElementById('mobile-ui-container').style.display = 'block';
+            document.body.classList.add('playing');
+            initAudioEngine();
+            isPlaying = true;
+
+            for(let i=0; i<70; i++) {
+                let rx = Math.random() * (map[0].length * TILE_SIZE);
+                let ry = Math.random() * (map.length * TILE_SIZE);
+                let c = Math.floor(rx/TILE_SIZE), r = Math.floor(ry/TILE_SIZE);
+                if(map[r] && map[r][c] === 0) {
+                    bloodStains.push({ x: rx, y: ry, w: 10 + Math.random()*30, h: 6 + Math.random()*15, angle: Math.random() * Math.PI });
+                }
+            }
+            window.focus();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function getTileAt(x, y) {
+            let c = Math.floor(x / TILE_SIZE), r = Math.floor(y / TILE_SIZE);
+            if(r < 0 || r >= map.length || c < 0 || c >= map[0].length) return 1;
+            return map[r][c];
+        }
+
+        function updatePlayer() {
+            let dx = 0, dy = 0;
+            if (deviceMode === 'pc') {
+                if (keys['w']) dy -= player.speed; if (keys['s']) dy += player.speed;
+                if (keys['a']) dx -= player.speed; if (keys['d']) dx += player.speed;
+                if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
+                player.angle = Math.atan2(mouse.y - canvas.height / 2, mouse.x - canvas.width / 2);
+            } else {
+                dx = touchStick.dx * player.speed; dy = touchStick.dy * player.speed;
+            }
+
+            let nextX = player.x + dx, nextY = player.y + dy;
+            let isMoving = (dx !== 0 || dy !== 0);
+
+            if (getTileAt(nextX - player.size, player.y) === 0 && getTileAt(nextX + player.size, player.y) === 0) player.x = nextX;
+            if (getTileAt(player.x, nextY - player.size) === 0 && getTileAt(player.x, nextY + player.size) === 0) player.y = nextY;
+
+            // ========================================================
+            // ★ 新環境驚かし要素のアップデート（ブレイングリッチ＆ブラッドフォール）
+            // ========================================================
+            
+            // 1. 【新怪異】脳髄破断グリッチ（突然画面が血に染まり不規則に跳ねる）
+            if (isMoving && !brainGlitch.active && Math.random() < 0.002) {
+                brainGlitch.active = true; brainGlitch.frame = 8 + Math.floor(Math.random()*6);
+                playGlitchGlanceAudio();
+            }
+            if (brainGlitch.active) {
+                brainGlitch.frame--;
+                brainGlitch.intensityX = (Math.random() - 0.5) * 45;
+                brainGlitch.intensityY = (Math.random() - 0.5) * 45;
+                if (brainGlitch.frame <= 0) brainGlitch.active = false;
+            }
+
+            // 2. 【新怪異】ブラッド・フォール（ライト照射視野内に突如幻影の血が降る）
+            if (isMoving && lightOn && !bloodRain.active && Math.random() < 0.004) {
+                bloodRain.active = true; bloodRain.particles = [];
+                let fAngle = player.angle + (Math.random() - 0.5) * 0.4;
+                let startX = player.x + Math.cos(fAngle) * 250;
+                let startY = player.y + Math.sin(fAngle) * 250;
+                for (let i = 0; i < 20; i++) {
+                    bloodRain.particles.push({ x: startX + (Math.random()-0.5)*40, y: startY - 50 + Math.random()*20, vy: 4 + Math.random()*6, life: 18 });
+                }
+            }
+            if (bloodRain.active) {
+                let alive = false;
+                bloodRain.particles.forEach(p => {
+                    p.y += p.vy; p.life--; if (p.life > 0) alive = true;
+                });
+                if (!alive) bloodRain.active = false;
+            }
+
+            // サブリミナル幻影
+            if (isMoving && lightOn && !phantom.visible && Math.random() < 0.006) {
+                let pAngle = player.angle + (Math.random() > 0.5 ? 0.42 : -0.42);
+                phantom.x = player.x + Math.cos(pAngle) * 310; phantom.y = player.y + Math.sin(pAngle) * 310;
+                if (getTileAt(phantom.x, phantom.y) === 0) { phantom.visible = true; phantom.frame = 10; }
+            }
+            if (phantom.visible) { phantom.frame--; if (phantom.frame <= 0) phantom.visible = false; }
+
+            // 足音の怪異
+            if (!isMoving && !isScareRunning) {
+                if (!ghostFootstep.active) {
+                    ghostFootstep.active = true; ghostFootstep.timer = 0;
+                    ghostFootstep.count = Math.floor(Math.random() * 3) + 1; ghostFootstep.delay = 35;
+                } else if (ghostFootstep.count > 0) {
+                    ghostFootstep.timer++;
+                    if (ghostFootstep.timer >= ghostFootstep.delay) {
+                        ghostFootstep.timer = 0; ghostFootstep.count--;
+                        playGhostFootstepAudio();
+                        if (ghostFootstep.count === 0 && Math.random() < 0.22) triggerJumpscare();
+                    }
+                }
+            } else { ghostFootstep.active = false; }
+
+            // ========================================================
+            // ★ ジャンプスケア頻度の極限引き上げ（閾値 300→100、確率大幅アップ）
+            // ========================================================
+            if (isMoving && lightOn) {
+                stepCounter++;
+                if (stepCounter > 100 && Math.random() < 0.028) triggerJumpscare();
+            }
+
+            // 暗闇追跡怪異AI
+            if (stalker.active && !lightOn) {
+                let sdx = player.x - stalker.x, sdy = player.y - stalker.y;
+                let sDist = Math.sqrt(sdx*sdx + sdy*sdy);
+                if (sDist > 2) {
+                    stalker.x += (sdx / sDist) * stalker.speed; stalker.y += (sdy / sDist) * stalker.speed;
+                }
+                stalker.intensity = Math.min(1.0, (350 - sDist) / 350);
+                if (sDist < 15) { stalker.active = false; triggerJumpscare(); }
+            }
+        }
+
+        function checkInteractions() {
+            items.forEach(item => {
+                if (item.active) {
+                    let dist = Math.sqrt((player.x - item.x)**2 + (player.y - item.y)**2);
+                    if (dist < 30) {
+                        item.active = false; collectedKeys++; keyCountUI.innerText = collectedKeys;
+                        triggerJumpscare();
+                    }
+                }
+            });
+            fakeItems.forEach(fake => {
+                if (fake.active) {
+                    let dist = Math.sqrt((player.x - fake.x)**2 + (player.y - fake.y)**2);
+                    if (dist < 30) { fake.active = false; triggerJumpscare(); }
+                }
+            });
+            notes.forEach(note => {
+                if (note.active) {
+                    let dist = Math.sqrt((player.x - note.x)**2 + (player.y - note.y)**2);
+                    if (dist < 30) {
+                        note.active = false; isReadingNote = true; keys = {};
+                        notePopup.innerHTML = langData[langMode].noteText + langData[langMode].noteClose;
+                        notePopup.style.display = "block";
+                    }
+                }
+            });
+            if (collectedKeys === 6) {
+                let dist = Math.sqrt((player.x - exitDoor.x)**2 + (player.y - exitDoor.y)**2);
+                if (dist < 40) triggerClearSequence();
+            }
+        }
+
+        function closeNote() { notePopup.style.display = "none"; isReadingNote = false; setTimeout(() => { triggerJumpscare(); }, 100); }
+
+        function triggerJumpscare() {
+            if (isScareRunning) return;
+            isScareRunning = true; keys = {}; touchStick.dx = 0; touchStick.dy = 0;
+
+            scareStages.forEach(s => s.style.display = "none");
+            let type = Math.floor(Math.random() * scareStages.length);
+            
+            scareContainer.classList.add('scare-active');
+            scareStages[type].style.display = "flex";
+
+            playUltimateScream();
+
+            const bugs = langData[langMode].bugs;
+            document.title = bugs[Math.floor(Math.random()*bugs.length)];
+
+            setTimeout(() => {
+                scareContainer.classList.remove('scare-active');
+                isScareRunning = false; stepCounter = 0;
+                document.title = "PSYCHO PARANOIA";
+            }, 550 + Math.random() * 250);
+        }
+
+        function triggerClearSequence() {
+            isPlaying = false; document.body.classList.remove('playing');
+            if (audioCtx) {
+                clearInterval(heartbeatInterval); if (lowDroneNode) lowDroneNode.stop();
+                let now = audioCtx.currentTime;
+                let osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+                osc.type = 'triangle'; osc.frequency.setValueAtTime(330, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 2.5);
+                g.gain.setValueAtTime(0.4, now); g.gain.linearRampToValueAtTime(0.001, now + 2.5);
+                osc.connect(g); g.connect(audioCtx.destination); osc.start(); osc.stop(now + 2.5);
+            }
+            document.getElementById('clear-screen').classList.add('fade-in');
+        }
+
+        // ========================================================
+        // ★ 高端Canvasグラフィック＆マスカンバス変調
+        // ========================================================
+        function draw() {
+            // ブレイングリッチ発動時は背景がフラッシュ赤化
+            ctx.fillStyle = brainGlitch.active ? 'rgba(90, 0, 0, 0.9)' : '#000002';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            let camX = canvas.width / 2 - player.x;
+            let camY = canvas.height / 2 - player.y;
+
+            // グリッチの激しい揺れインジェクション
+            if (brainGlitch.active) { camX += brainGlitch.intensityX; camY += brainGlitch.intensityY; }
+
+            ctx.save(); ctx.translate(camX, camY);
+
+            // 1. 迷宮構造のレンダリング
+            for (let r = 0; r < map.length; r++) {
+                for (let c = 0; c < map[r].length; c++) {
+                    if (map[r][c] === 1) {
+                        ctx.fillStyle = '#050508'; ctx.fillRect(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeStyle = '#0a0a0f'; ctx.lineWidth = 2; ctx.strokeRect(c * TILE_SIZE, r * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
+                }
+            }
+
+            // 2. 血痕描画
+            ctx.fillStyle = "rgba(55, 0, 0, 0.7)";
+            bloodStains.forEach(stain => {
+                ctx.save(); ctx.translate(stain.x, stain.y); ctx.rotate(stain.angle);
+                ctx.beginPath(); ctx.ellipse(0, 0, stain.w, stain.h, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            });
+
+            // 3. ギミックオブジェクト
+            ctx.fillStyle = collectedKeys === 6 ? '#0f0' : '#200';
+            ctx.fillRect(exitDoor.x - 20, exitDoor.y - 25, 40, 50);
+
+            items.forEach(item => {
+                if (item.active) {
+                    ctx.fillStyle = '#990000'; ctx.beginPath();
+                    ctx.moveTo(item.x, item.y - 12); ctx.lineTo(item.x + 10, item.y);
+                    ctx.lineTo(item.x, item.y + 12); ctx.lineTo(item.x - 10, item.y); ctx.fill();
+                }
+            });
+            fakeItems.forEach(fake => {
+                if (fake.active) {
+                    ctx.fillStyle = '#990000'; ctx.beginPath();
+                    ctx.moveTo(fake.x, fake.y - 12); ctx.lineTo(fake.x + 10, fake.y);
+                    ctx.lineTo(fake.x, fake.y + 12); ctx.lineTo(fake.x - 10, fake.y); ctx.fill();
+                }
+            });
+            notes.forEach(note => { if (note.active) { ctx.fillStyle = '#444'; ctx.fillRect(note.x - 10, note.y - 14, 20, 28); } });
+
+            // 4. サブリミナル幻影
+            if (phantom.visible && lightOn) {
+                ctx.fillStyle = `rgba(240, 240, 255, ${Math.random() * 0.4 + 0.1})`;
+                ctx.beginPath(); ctx.arc(phantom.x, phantom.y, 16, 0, Math.PI * 2); ctx.fill();
+                ctx.fillRect(phantom.x - 4, phantom.y, 8, 35);
+            }
+
+            // 5. 【新怪異視覚】ブラッド・フォールパーティクルのCanvas描画
+            if (bloodRain.active) {
+                ctx.fillStyle = 'rgba(150, 0, 0, 0.8)';
+                bloodRain.particles.forEach(p => {
+                    ctx.fillRect(p.x, p.y, 3, 7);
+                });
+            }
+
+            // 6. 消灯ストーカー
+            if (stalker.active && !lightOn) {
+                ctx.fillStyle = `rgba(0, 0, 0, ${stalker.intensity})`;
+                ctx.beginPath(); ctx.arc(stalker.x, stalker.y, 25, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = `rgba(255, 0, 0, ${stalker.intensity * 1.5})`;
+                ctx.fillRect(stalker.x - 10, stalker.y - 4, 6, 4); ctx.fillRect(stalker.x + 4, stalker.y - 4, 6, 4);
+            }
+
+            // 7. プレイヤーコア
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2); ctx.fill();
+
+            ctx.restore();
+
+            // Dynamic Masking / Darkness Mod
+            if (!maskCanvas) { maskCanvas = document.createElement('canvas'); maskCtx = maskCanvas.getContext('2d'); }
+            if (maskCanvas.width !== canvas.width || maskCanvas.height !== canvas.height) { maskCanvas.width = canvas.width; maskCanvas.height = canvas.height; }
+
+            maskCtx.fillStyle = `rgba(0, 0, 2, ${valDarkness + 0.05})`; maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+            let screenPX = canvas.width / 2, screenPY = canvas.height / 2;
+            maskCtx.globalCompositeOperation = 'destination-out';
+            
+            lightFlickerFrame++;
+            let currentLightFlicker = true;
+            if (Math.random() < 0.015 && lightFlickerFrame > 100) {
+                currentLightFlicker = false; if(Math.random() < 0.3) lightFlickerFrame = 0;
+            }
+
+            if (lightOn && currentLightFlicker) {
+                maskCtx.fillStyle = 'rgba(0, 0, 0, 1)';
+                maskCtx.beginPath(); maskCtx.moveTo(screenPX, screenPY);
+                maskCtx.arc(screenPX, screenPY, 460, player.angle - 0.52, player.angle + 0.52, false);
+                maskCtx.closePath(); maskCtx.fill();
+                maskCtx.beginPath(); maskCtx.arc(screenPX, screenPY, 45, 0, Math.PI * 2); maskCtx.fill();
+            } else {
+                maskCtx.beginPath(); maskCtx.arc(screenPX, screenPY, 10, 0, Math.PI * 2); maskCtx.fill();
+            }
+            maskCtx.globalCompositeOperation = 'source-over';
+            ctx.drawImage(maskCanvas, 0, 0);
+
+            if (lightOn && currentLightFlicker) {
+                let shadowGrad = ctx.createRadialGradient(screenPX, screenPY, 45, screenPX, screenPY, 460);
+                shadowGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                shadowGrad.addColorStop(0.4, 'rgba(0,0,0,0.1)');
+                shadowGrad.addColorStop(0.75, `rgba(0,0,0,${valDarkness})`);
+                shadowGrad.addColorStop(1, 'rgba(0,0,0,0.99)');
+                ctx.fillStyle = shadowGrad; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            ambientTimer += 0.05;
+            ctx.fillStyle = `rgba(255, 255, 255, ${0.015 + Math.sin(ambientTimer)*0.004})`;
+            for (let i = 0; i < 8; i++) { ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2); }
+        }
+
+        function gameLoop() {
+            if (!isPlaying) return;
+            if (!isScareRunning && !isReadingNote) { updatePlayer(); checkInteractions(); }
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 初期ロード実行
+        setLanguage('en');
+        resizeCanvas();
+    </script>
+</body>
+</html>
